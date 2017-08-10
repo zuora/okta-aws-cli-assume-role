@@ -120,10 +120,21 @@ public class awscli {
         logger.trace("Role to assume ARN: " + roleToAssume);
 
         // Step #5: Write the credentials to ~/.aws/credentials
-        String profileName = setAWSCredentials(assumeResult, arn);
+        String profileName;
+        if (0 == args.length) {
+            profileName = createDefaultProfileName(arn);
+        } else if (1 == args.length) {
+            profileName = args[0];
+        } else {
+            System.out.println("Incorrect number of arguments. This tool accepts only one optional argument."
+                    + " You can specify an AWS CLI profile to write results to or not.");
+            return;
+        }
+        setAWSCredentials(assumeResult, profileName);
 
         UpdateConfigFile(profileName, roleToAssume);
-        UpdateConfigFile(DefaultProfileName, roleToAssume);
+        //Don't do this because it the user might not appreciate losing their current default profile information.
+        //UpdateConfigFile(DefaultProfileName, roleToAssume);
 
         // Print Final message
         resultMessage(profileName);
@@ -604,7 +615,7 @@ public class awscli {
     /* Retrieves AWS credentials from AWS's assumedRoleResult and write the to aws credential file
      * Precondition :  AssumeRoleWithSAMLResult assumeResult
      */
-    private static String setAWSCredentials(AssumeRoleWithSAMLResult assumeResult, String credentialsProfileName) throws FileNotFoundException, UnsupportedEncodingException, IOException {
+    private static void setAWSCredentials(AssumeRoleWithSAMLResult assumeResult, String credentialsProfileName) throws FileNotFoundException, UnsupportedEncodingException, IOException {
         BasicSessionCredentials temporaryCredentials =
                 new BasicSessionCredentials(
                         assumeResult.getCredentials().getAccessKeyId(),
@@ -615,6 +626,14 @@ public class awscli {
         String awsSecretKey = temporaryCredentials.getAWSSecretKey();
         String awsSessionToken = temporaryCredentials.getSessionToken();
 
+        //update the credentials file with the unique profile name
+        UpdateCredentialsFile(credentialsProfileName, awsAccessKey, awsSecretKey, awsSessionToken);
+        // Don't override the default profile, this may clobber existing credentials in there.
+        //also override the default profile
+        //UpdateCredentialsFile(DefaultProfileName, awsAccessKey, awsSecretKey, awsSessionToken);
+    }
+
+    private static String createDefaultProfileName(String credentialsProfileName) {
         if (credentialsProfileName.startsWith("arn:aws:sts::")) {
             credentialsProfileName = credentialsProfileName.substring(13);
         }
@@ -622,14 +641,9 @@ public class awscli {
             credentialsProfileName = credentialsProfileName.replaceAll(":assumed-role", "");
         }
 
-        Object[] args = {new String(credentialsProfileName), selectedPolicyRank};
+        Object[] messageArgs = {new String(credentialsProfileName), selectedPolicyRank};
         MessageFormat profileNameFormat = new MessageFormat("{0}/{1}");
-        credentialsProfileName = profileNameFormat.format(args);
-
-        //update the credentials file with the unique profile name
-        UpdateCredentialsFile(credentialsProfileName, awsAccessKey, awsSecretKey, awsSessionToken);
-        //also override the default profile
-        UpdateCredentialsFile(DefaultProfileName, awsAccessKey, awsSecretKey, awsSessionToken);
+        credentialsProfileName = profileNameFormat.format(messageArgs);
 
         return credentialsProfileName;
     }
@@ -957,7 +971,7 @@ public class awscli {
                 System.out.println("Invalid token, please try again");
             }
 
-            System.out.println("Token: ");
+            System.out.print("Token: ");
             answer = scanner.nextLine();
             //verify auth Token
             if (answer.toLowerCase().equals("change factor")) {
@@ -1184,7 +1198,7 @@ public class awscli {
                 System.out.println("Invalid token, please try again");
             }
 
-            System.out.println("Token: ");
+            System.out.print("Token: ");
             answer = scanner.nextLine();
             //verify auth Token
             if (answer.toLowerCase().equals("change factor")) {
