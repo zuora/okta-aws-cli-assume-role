@@ -739,32 +739,21 @@ public class awscli {
         File tempFile = new File(inFile.getAbsolutePath() + ".tmp");
         PrintWriter pw = new PrintWriter(new FileWriter(tempFile));
 
-        //first, we add our refreshed profile
-        WriteNewRoleToAssume(pw, profileName, roleToAssume);
-
         String line = null;
-        int lineCounter = 0;
-        boolean bFileStart = true;
+        boolean profileExists = false;
 
-        //second, we're copying all the other profiles from the original config file
+        // Search for an existing profile but don't touch the file.
         while ((line = br.readLine()) != null) {
-
             if (line.contains(profileName)) {
-                //we found the section we must replace but we don't necessarily know how many lines we need to skip
-                while ((line = br.readLine()) != null) {
-                    if (line.startsWith("[")) {
-                        pw.println(line); //this is a new profile line, so we're copying it
-                        break;
-                    }
-                }
-            } else {
-                if ((!line.contains(profileName) && !line.equalsIgnoreCase("\n"))) {
-                    pw.println(line);
-                    logger.debug(line);
-                }
+                profileExists = true;
             }
 
+            pw.println(line);
+        }
 
+        // If there is no existing profile, then write configuration for the new profile.
+        if (!profileExists) {
+            WriteNewRoleToAssume(pw, profileName, roleToAssume);
         }
 
         pw.flush();
