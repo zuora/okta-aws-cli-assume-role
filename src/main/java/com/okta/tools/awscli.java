@@ -37,6 +37,13 @@ import com.okta.sdk.exceptions.ApiException;
 import com.okta.sdk.framework.ApiClientConfiguration;
 import com.okta.sdk.models.auth.AuthResult;
 import com.okta.sdk.models.factors.Factor;
+
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.CommandLineParser;
+import org.apache.commons.cli.DefaultParser;
+import org.apache.commons.cli.HelpFormatter;
+import org.apache.commons.cli.Option;
+import org.apache.commons.cli.Options;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.http.client.ClientProtocolException;
 import org.apache.http.client.methods.CloseableHttpResponse;
@@ -66,6 +73,20 @@ import org.apache.logging.log4j.LogManager;
 
 public class awscli {
 
+    private static final String SECOND_FACTOR_TOKEN_OPT = "tok";
+
+    private static final String SECOND_FACTOR_TYPE_OPT = "typ";
+
+    private static final String PASSWORD_OPT = "psw";
+
+    private static final String USERNAME_OPT = "usr";
+
+    private static final String ROLE_OPT = "r";
+
+    private static final String PROFILE_OPT = "p";
+
+    private static Set<String> SUPPORTED_2FA = new HashSet<String>(Arrays.asList(new String[] { "google" }));
+
     //User specific variables
     private static String oktaOrg = "";
     private static String oktaAWSAppURL = "";
@@ -82,10 +103,24 @@ public class awscli {
     private static String roleToAssume; //the ARN of the role the user wants to eventually assume (not the cross-account role, the "real" role in the target account)
     private static int selectedPolicyRank; //the zero-based rank of the policy selected in the selected cross-account role (in case there is more than one policy tied to the current policy)
     private static final Logger logger = LogManager.getLogger(awscli.class);
+ 
+    private static CommandLine cli;
+    private static Options cliOptions;
 
     public static void main(String[] args) throws Exception {
         awsSetup();
         extractCredentials();
+
+        cliOptions = createCliOptions();
+        if ((1 == args.length) && (args[0].equalsIgnoreCase("help") || args[0].equalsIgnoreCase("--help"))) {
+            printUsage();
+            System.exit(0);
+        }
+
+        if (1 < args.length) {
+            CommandLineParser parser = new DefaultParser();
+            cli = parser.parse(cliOptions, args);
+        }
 
         // Step #1: Initiate the authentication and capture the SAML assertion.
         CloseableHttpClient httpClient = null;
@@ -125,9 +160,12 @@ public class awscli {
             profileName = createDefaultProfileName(arn);
         } else if (1 == args.length) {
             profileName = args[0];
+        } else if ((null != cli) && cli.hasOption(PROFILE_OPT)) {
+            profileName = cli.getOptionValue(PROFILE_OPT);
         } else {
-            System.out.println("Incorrect number of arguments. This tool accepts only one optional argument."
-                    + " You can specify an AWS CLI profile to write results to or not.");
+            System.out.println("Incorrect usage. You can specify a single argument as the AWS CLI profile to write results to"
+                    + " or you can use the following command line options.");
+            printUsage();
             return;
         }
         setAWSCredentials(assumeResult, profileName);
@@ -137,32 +175,47 @@ public class awscli {
         //UpdateConfigFile(DefaultProfileName, roleToAssume);
 
         // Print Final message
-        resultMessage(profileName);
+        if (null == cli) {
+            resultMessage(profileName);
+        }
+    }
+
+    private static void printUsage() {
+        HelpFormatter formatter = new HelpFormatter();
+        formatter.printHelp("okta-aws-login", cliOptions );
     }
 
     /* Authenticates users credentials via Okta, return Okta session token
      * Postcondition: returns String oktaSessionToken
      * */
     private static String oktaAuthntication() throws ClientProtocolException, JSONException, IOException {
+        Scanner scanner = new Scanner(System.in);
         CloseableHttpResponse responseAuthenticate = null;
         int requestStatus = 0;
 
         //Redo sequence if response from AWS doesn't return 200 Status
         while (requestStatus != 200) {
 
-            // Prompt for user credentials
-            System.out.print("Username: ");
-            Scanner scanner = new Scanner(System.in);
+            String oktaUsername;
+            if ((null != cli) && cli.hasOption(USERNAME_OPT)) {
+                oktaUsername = cli.getOptionValue(USERNAME_OPT);
+            } else {
+                // Prompt for user credentials
+                System.out.print("Username: ");
+                oktaUsername = scanner.next();
+            }
 
-            String oktaUsername = scanner.next();
-
-            Console console = System.console();
-            String oktaPassword = null;
-            if (console != null) {
-                oktaPassword = new String(console.readPassword("Password: "));
-            } else { // hack to be able to debug in an IDE
-                System.out.print("Password: ");
-                oktaPassword = scanner.next();
+            String oktaPassword;
+            if ((null != cli) && cli.hasOption(PASSWORD_OPT)) {
+                oktaPassword = cli.getOptionValue(PASSWORD_OPT);
+            } else {
+                Console console = System.console();
+                if (console != null) {
+                    oktaPassword = new String(console.readPassword("Password: "));
+                } else { // hack to be able to debug in an IDE
+                    System.out.print("Password: ");
+                    oktaPassword = scanner.next();
+                }
             }
 
             responseAuthenticate = authnticateCredentials(oktaUsername, oktaPassword);
@@ -171,10 +224,7 @@ public class awscli {
         }
 
         //Retrieve and parse the Okta response for session token
-        BufferedReader br = new BufferedReader(new InputStreamReader(
-                (responseAuthenticate.getEntity().getContent())));
-
-        String outputAuthenticate = br.readLine();
+        String outputAuthenticate = responseBodyToString(responseAuthenticate);
         JSONObject jsonObjResponse = new JSONObject(outputAuthenticate);
 
         responseAuthenticate.close();
@@ -184,6 +234,11 @@ public class awscli {
         } else {
             return jsonObjResponse.getString("sessionToken");
         }
+    }
+
+    private static String responseBodyToString(CloseableHttpResponse response) throws IOException {
+        BufferedReader br = new BufferedReader(new InputStreamReader((response.getEntity().getContent())));
+        return br.readLine();
     }
 
     /*Uses user's credentials to obtain Okta session Token */
@@ -286,20 +341,42 @@ public class awscli {
     }
 
     /*Handles possible authentication failures */
-    private static void authnFailHandler(int requestStatus, CloseableHttpResponse response) {
-        //invalid creds
-        if (requestStatus == 400 || requestStatus == 401) {
-            logger.error("You provided invalid credentials, please run this program again.");
-        } else if (requestStatus == 500) {
-            //failed connection establishment
-            logger.error("\nUnable to establish connection with: " +
-                    oktaOrg + " \nPlease verify that your Okta org url is correct and try again");
-            System.exit(0);
-        } else if (requestStatus != 200) {
-            //other
-            throw new RuntimeException("Failed : HTTP error code : "
-                    + response.getStatusLine().getStatusCode());
+    private static void authnFailHandler(int responseStatus, CloseableHttpResponse response) throws IOException {
+        if (200 == responseStatus) {
+            return;
         }
+
+        String responseBody = responseBodyToString(response);
+
+        StringBuffer messageBuffer = new StringBuffer();
+        messageBuffer.append("The Okta server returned HTTP status code " + responseStatus + ".\n");
+        if (responseStatus == 401) {
+            messageBuffer.append("This is likely an authentication failure due to invalid credentials. The response body is:\n");
+            messageBuffer.append(responseBody);
+            if (null == cli) {
+                logger.error(messageBuffer.toString());
+                return;
+            }
+        } else if ((400 <= responseStatus) || (500 > responseStatus)) {
+            messageBuffer.append("This is likely due to a bad request. The response body is:\n");
+            messageBuffer.append(responseBody);
+            if (null == cli) {
+                logger.error(messageBuffer.toString());
+                return;
+            }
+        } else if ((500 <= responseStatus) || (600 > responseStatus)) {
+            messageBuffer.append("This is likely due to an server error. The response body is:\n");
+            messageBuffer.append(responseBody);
+            if (null == cli) {
+                logger.error(messageBuffer.toString());
+                System.exit(0);
+            }
+        } else {
+            messageBuffer.append("This is an unrecognized error. The response body is:\n");
+            messageBuffer.append(responseBody);
+        }
+
+        throw new RuntimeException(messageBuffer.toString());
     }
 
     /*Handles possible AWS assertion retrieval errors */
@@ -316,9 +393,9 @@ public class awscli {
 
     /* Handles user selection prompts */
     private static int numSelection(int max) {
-        Scanner scanner = new Scanner(System.in);
-
         int selection = -1;
+
+        Scanner scanner = new Scanner(System.in);
         while (selection == -1) {
             //prompt user for selection
             System.out.print("Selection: ");
@@ -390,6 +467,18 @@ public class awscli {
             System.exit(0);
         }
 
+        if ((null != cli) && cli.hasOption(ROLE_OPT)) {
+            String cliRole = cli.getOptionValue(ROLE_OPT);
+            String[] parts = findMatchingRole(resultSAMLDecoded, cliRole);
+            if (null == parts) {
+                System.out.println(String.format("You are not allowed to assume the '%s' role. Either you don't have permission or there is a typographical error in your input.", cliRole));
+                System.exit(1);
+            }
+            String principalArn = parts[0];
+            String roleArn = parts[1];
+            return awsStsAssumeRoleWithSaml(resultSAML, principalArn, roleArn);
+        }
+
         System.out.println("\nPlease choose the role you would like to assume: ");
 
         //Gather list of applicable AWS roles
@@ -421,6 +510,11 @@ public class awscli {
         logger.debug("Cross-account role is " + crossAccountRoleName);
 
 
+        return awsStsAssumeRoleWithSaml(resultSAML, principalArn, roleArn);
+    }
+
+    private static AssumeRoleWithSAMLResult awsStsAssumeRoleWithSaml(String resultSAML, String principalArn,
+            String roleArn) {
         //creates empty AWS credentials to prevent the AWSSecurityTokenServiceClient object from unintentionally loading the previous profile we just created
         BasicAWSCredentials awsCreds = new BasicAWSCredentials("", "");
 
@@ -434,6 +528,21 @@ public class awscli {
                 .withDurationSeconds(3600); //default token duration to 12 hours
 
         return stsClient.assumeRoleWithSAML(assumeRequest);
+    }
+
+    private static String[] findMatchingRole(String resultSAMLDecoded, String role) {
+        while (resultSAMLDecoded.indexOf("arn:aws") != -1) {
+            int start = resultSAMLDecoded.indexOf("arn:aws");
+            int end = resultSAMLDecoded.indexOf("</saml2:", start);
+            String resultSAMLRole = resultSAMLDecoded.substring(start, end);
+            String[] parts = resultSAMLRole.split(",");
+            String roleArn = parts[1];
+            if (roleArn.equalsIgnoreCase(role) || roleArn.toLowerCase().endsWith("/" + role.toLowerCase())) {
+                return parts;
+            }
+            resultSAMLDecoded = (resultSAMLDecoded.substring(resultSAMLDecoded.indexOf("</saml2:AttributeValue") + 1));
+        }
+        return null;
     }
 
     private static void GetRoleToAssume(String roleName) {
@@ -856,14 +965,35 @@ public class awscli {
  */
     public static JSONObject selectFactor(JSONObject authResponse) throws JSONException {
         JSONArray factors = authResponse.getJSONObject("_embedded").getJSONArray("factors");
-        JSONObject factor;
-        String factorType;
+
+        if ((cli != null) && cli.hasOption(SECOND_FACTOR_TYPE_OPT)) {
+            String cliFactorType = cli.getOptionValue(SECOND_FACTOR_TYPE_OPT).toLowerCase();
+            if (!SUPPORTED_2FA.contains(cliFactorType)) {
+                printUsage();
+            }
+
+            // Find the requested TOTP second factor of authentication.
+            for (int i = 0; i < factors.length(); i++) {
+                JSONObject factor = factors.getJSONObject(i);
+                String factorType = factor.getString("factorType");
+                if (factorType.equals("token:software:totp")) {
+                    String provider = factor.getString("provider");
+                    if (provider.equalsIgnoreCase(cliFactorType)) {
+                        return factor;
+                    }
+                }
+            }
+
+            System.out.println(String.format("The configured identity provider does not support '%s' as a second factor of authentication.", cliFactorType));
+            System.exit(1);
+        }
+
         System.out.println("\nMulti-Factor authentication is required. Please select a factor to use.");
         //list factor to select from to user
         System.out.println("Factors:");
         for (int i = 0; i < factors.length(); i++) {
-            factor = factors.getJSONObject(i);
-            factorType = factor.getString("factorType");
+            JSONObject factor = factors.getJSONObject(i);
+            String factorType = factor.getString("factorType");
             if (factorType.equals("question")) {
                 factorType = "Security Question";
             } else if (factorType.equals("sms")) {
@@ -915,6 +1045,10 @@ public class awscli {
      * Postcondition: return session token as String sessionToken
      */
     private static String smsFactor(JSONObject factor, String stateToken) throws ClientProtocolException, JSONException, IOException {
+        if ((null != cli) && cli.hasOption(SECOND_FACTOR_TOKEN_OPT)) {
+            return verifyAnswer(cli.getOptionValue(SECOND_FACTOR_TOKEN_OPT), factor, stateToken, "sms");
+        }
+
         Scanner scanner = new Scanner(System.in);
         String answer = "";
         String sessionToken = "";
@@ -928,7 +1062,7 @@ public class awscli {
                 //send initial code to user
                 sessionToken = verifyAnswer("", factor, stateToken, "sms");
             }
-            System.out.println("SMS Code: ");
+            System.out.print("SMS Code: ");
             answer = scanner.nextLine();
             //resends code
             if (answer.equals("new code")) {
@@ -944,11 +1078,16 @@ public class awscli {
     }
 
 
-    /*Handles token factor authentication, i.e: Google Authenticator or Okta Verify
-     * Precondition: question factor as JSONObject factor, current state token stateToken
-     * Postcondition: return session token as String sessionToken
+    /* 
+     * Handles token factor authentication, i.e: Google Authenticator or Okta Verify
+     *  Precondition: question factor as JSONObject factor, current state token stateToken
+     *  Postcondition: return session token as String sessionToken
      */
     private static String totpFactor(JSONObject factor, String stateToken) throws ClientProtocolException, JSONException, IOException {
+        if ((null != cli) && cli.hasOption(SECOND_FACTOR_TOKEN_OPT)) {
+            return verifyAnswer(cli.getOptionValue(SECOND_FACTOR_TOKEN_OPT), factor, stateToken, "token:software:totp");
+        }
+
         Scanner scanner = new Scanner(System.in);
         String sessionToken = "";
         String answer = "";
@@ -1018,8 +1157,6 @@ public class awscli {
 
         JSONObject jsonObjResponse = null;
 
-        //if (factorType.equals("question")) {
-
         if (answer != null && answer != "") {
             profile.put("answer", answer);
         }
@@ -1038,13 +1175,14 @@ public class awscli {
         httpost.setEntity(entity);
         responseAuthenticate = httpClient.execute(httpost);
 
-        BufferedReader br = new BufferedReader(new InputStreamReader((responseAuthenticate.getEntity().getContent())));
-
-        String outputAuthenticate = br.readLine();
+        String outputAuthenticate = responseBodyToString(responseAuthenticate);
         jsonObjResponse = new JSONObject(outputAuthenticate);
 
         if (jsonObjResponse.has("errorCode")) {
             String errorSummary = jsonObjResponse.getString("errorSummary");
+            if (null != cli) {
+                throw new RuntimeException("MFA authentication failed with: " + errorSummary);
+            }
             System.out.println(errorSummary);
             System.out.println("Please try again");
             if (factorType.equals("question")) {
@@ -1055,7 +1193,6 @@ public class awscli {
                 totpFactor(factor, stateToken);
             }
         }
-        //}
 
         if (jsonObjResponse != null && jsonObjResponse.has("sessionToken"))
             sessionToken = jsonObjResponse.getString("sessionToken");
@@ -1096,7 +1233,7 @@ public class awscli {
 
                     responsePush = httpClient.execute(pollReq);
 
-                    br = new BufferedReader(new InputStreamReader((responsePush.getEntity().getContent())));
+                    BufferedReader br = new BufferedReader(new InputStreamReader((responsePush.getEntity().getContent())));
 
                     String outputTransaction = br.readLine();
                     JSONObject jsonTransaction = new JSONObject(outputTransaction);
@@ -1117,19 +1254,11 @@ public class awscli {
 
                     }
 
-                    //if(pushResult.equals("SUCCESS")) {
                     if (jsonTransaction.has("sessionToken")) {
                         sessionToken = jsonTransaction.getString("sessionToken");
                     }
-                    //}
-                    /*
-                    if(pushResult.equals("TIMEOUT")) {
-                        sessionToken = "timeout";
-                    }
-*/
                 }
             }
-
         }
 
 
@@ -1488,5 +1617,30 @@ public class awscli {
         return strSessionToken;
     }
 
+    static Options createCliOptions() {
+        Options options = new Options();
+        options.addOption(Option.builder(PROFILE_OPT).argName("profile").longOpt("profile").hasArg(true)
+                .desc("The AWS profile used to write configuration and credentials on success.")
+                .required(false).build());
+        options.addOption(Option.builder(ROLE_OPT).argName("role").longOpt("role").hasArg(true)
+                .desc("The AWS role to assume upon authentication success. "
+                        + "NOTE: if you enter a role that you are not allowed to assume the login will fail.")
+                .required(false).build());
+        options.addOption(Option.builder(USERNAME_OPT).argName("username").longOpt("username").hasArg(true)
+                .desc("The SSO username used for Okta authentication.")
+                .required(false).build());
+        options.addOption(Option.builder(PASSWORD_OPT).argName("password").longOpt("password").hasArg(true)
+                .desc("The SSO password used for Okta authentication. "
+                        + "WARNING: remember to clear your shell history if you use this option!")
+                .required(false).build());
+        options.addOption(Option.builder(SECOND_FACTOR_TYPE_OPT).argName("2fa-type").longOpt("2fa-type").hasArg(true)
+                .desc("An desired type of second factor authentication."
+                        + " Currently, this tool only supports 'google' as a non-interactive second factor of authentication.")
+                .required(false).build());
+        options.addOption(Option.builder(SECOND_FACTOR_TOKEN_OPT).argName("2fa-token").longOpt("2fa-token").hasArg(true)
+                .desc("The token for the second factor of authentication.")
+                .required(false).build());
+        return options;
+    }
 
 }
