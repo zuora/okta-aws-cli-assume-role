@@ -1023,12 +1023,12 @@ public class awscli {
 
         //prompt user for answer
         System.out.println("\nSecurity Question Factor Authentication\nEnter 'change factor' to use a different factor\n");
-        while (sessionToken == "") {
+        while ((null == sessionToken) || "".equals(sessionToken)) {
             if (answer != "") {
-                System.out.println("Incorrect answer, please try again");
+                System.out.println("Please try again");
             }
             System.out.println(question);
-            System.out.println("Answer: ");
+            System.out.print("Answer: ");
             answer = scanner.nextLine();
             //verify answer is correct
             if (answer.toLowerCase().equals("change factor")) {
@@ -1055,9 +1055,9 @@ public class awscli {
 
         //prompt for sms verification
         System.out.println("\nSMS Factor Authentication \nEnter 'change factor' to use a different factor");
-        while (sessionToken == "") {
+        while ((null == sessionToken) || "".equals(sessionToken)) {
             if (answer != "") {
-                System.out.println("Incorrect passcode, please try again or type 'new code' to be sent a new sms token");
+                System.out.println("Please try again or type 'new code' to be sent a new sms token");
             } else {
                 //send initial code to user
                 sessionToken = verifyAnswer("", factor, stateToken, "sms");
@@ -1094,9 +1094,9 @@ public class awscli {
 
         //prompt for token
         System.out.println("\n" + factor.getString("provider") + " Token Factor Authentication\nEnter 'change factor' to use a different factor");
-        while (sessionToken == "") {
+        while ((null == sessionToken) || "".equals(sessionToken)) {
             if (answer != "") {
-                System.out.println("Invalid token, please try again");
+                System.out.println("Please try again");
             }
 
             System.out.print("Token: ");
@@ -1121,7 +1121,7 @@ public class awscli {
         String sessionToken = "";
 
         System.out.println("\nPush Factor Authentication");
-        while (sessionToken == "") {
+        while ((null == sessionToken) || "".equals(sessionToken)) {
             //System.out.println("Token: ");
             //prints waiting tick marks
             //if( time.compareTo(newTime) > 4000){
@@ -1179,19 +1179,12 @@ public class awscli {
         jsonObjResponse = new JSONObject(outputAuthenticate);
 
         if (jsonObjResponse.has("errorCode")) {
-            String errorSummary = jsonObjResponse.getString("errorSummary");
+            String message = "MFA authentication failed with: " + jsonObjResponse.getString("errorSummary");
             if (null != cli) {
-                throw new RuntimeException("MFA authentication failed with: " + errorSummary);
+                throw new RuntimeException(message);
             }
-            System.out.println(errorSummary);
-            System.out.println("Please try again");
-            if (factorType.equals("question")) {
-                questionFactor(factor, stateToken);
-            }
-
-            if (factorType.equals("token:software:totp")) {
-                totpFactor(factor, stateToken);
-            }
+            System.out.println(message);
+            return null;
         }
 
         if (jsonObjResponse != null && jsonObjResponse.has("sessionToken"))
@@ -1267,146 +1260,6 @@ public class awscli {
         else
             return pushResult;
     }
-
-
-    /*Handles question factor authentication,
-     * Precondition: question factor as JSONObject factor, current state token stateToken
-     * Postcondition: return session token as String sessionToken
-     */
-    private static String questionFactor(Factor factor, String stateToken) throws JSONException, ClientProtocolException, IOException {
-        /*
-        String question = factor.getJSONObject("profile").getString("questionText");
-        Scanner scanner = new Scanner(System.in);
-        String sessionToken = "";
-        String answer = "";
-
-        //prompt user for answer
-        System.out.println("\nSecurity Question Factor Authentication\nEnter 'change factor' to use a different factor\n");
-        while (sessionToken == "") {
-            if (answer != "") {
-                System.out.println("Incorrect answer, please try again");
-            }
-            System.out.println(question);
-            System.out.println("Answer: ");
-            answer = scanner.nextLine();
-            //verify answer is correct
-            if (answer.toLowerCase().equals("change factor")) {
-                return answer;
-            }
-            sessionToken = verifyAnswer(answer, factor, stateToken);
-        }
-        */
-        return "";//sessionToken;
-    }
-
-
-    /*Handles token factor authentication, i.e: Google Authenticator or Okta Verify
-    * Precondition: question factor as JSONObject factor, current state token stateToken
-    * Postcondition: return session token as String sessionToken
-    */
-    private static String totpFactor(Factor factor, String stateToken) throws IOException {
-        Scanner scanner = new Scanner(System.in);
-        String sessionToken = "";
-        String answer = "";
-
-        //prompt for token
-        System.out.println("\n" + factor.getProvider() + " Token Factor Authentication\nEnter 'change factor' to use a different factor");
-        while (sessionToken == "") {
-            if (answer != "") {
-                System.out.println("Invalid token, please try again");
-            }
-
-            System.out.print("Token: ");
-            answer = scanner.nextLine();
-            //verify auth Token
-            if (answer.toLowerCase().equals("change factor")) {
-                return answer;
-            }
-
-            sessionToken = verifyAnswer(answer, factor, stateToken);
-        }
-        return sessionToken;
-    }
-
-
-    /*Handles verification for all Factor types
-    * Precondition: question factor as JSONObject factor, current state token stateToken
-    * Postcondition: return session token as String sessionToken
-    */
-    private static String verifyAnswer(String answer, Factor factor, String stateToken) throws IOException {
-
-        String strAuthResult = "";
-
-        AuthResult authResult = authClient.authenticateWithFactor(stateToken, factor.getId(), answer);
-
-        /*
-        Verification verification = new Verification();
-        if(factor.getFactorType().equals("sms")) {
-            verification.setPassCode(answer);
-        }
-        else if (factor.getFactorType().equals("token:software:totp")) {
-            verification.setAnswer(answer);
-        }
-        verification.setAnswer(answer);
-        FactorVerificationResponse mfaResponse  = factorClient.verifyFactor(userId, factor.getId(), verification);
-
-        if(mfaResponse.getFactorResult().equals("SUCCESS"))
-            return mfaResponse.get
-            */
-
-        if (!authResult.getStatus().equals("SUCCESS")) {
-            System.out.println("\nThe second-factor verification failed.");
-        } else {
-            return authResult.getSessionToken();
-        }
-
-        /*JSONObject profile = new JSONObject();
-        String verifyPoint = factor.getJSONObject("_links").getJSONObject("verify").getString("href");
-
-        profile.put("stateToken", stateToken);
-
-        if (answer != "") {
-            profile.put("answer", answer);
-        }
-
-        //create post request
-        CloseableHttpResponse responseAuthenticate = null;
-        CloseableHttpClient httpClient = HttpClients.createDefault();
-
-        HttpPost httpost = new HttpPost(verifyPoint);
-        httpost.addHeader("Accept", "application/json");
-        httpost.addHeader("Content-Type", "application/json");
-        httpost.addHeader("Cache-Control", "no-cache");
-
-        StringEntity entity = new StringEntity(profile.toString(), HTTP.UTF_8);
-        entity.setContentType("application/json");
-        httpost.setEntity(entity);
-        responseAuthenticate = httpClient.execute(httpost);
-
-        BufferedReader br = new BufferedReader(new InputStreamReader(
-                (responseAuthenticate.getEntity().getContent())));
-
-        String outputAuthenticate = br.readLine();
-        JSONObject jsonObjResponse = new JSONObject(outputAuthenticate);
-        //Handles request response
-        if (jsonObjResponse.has("sessionToken")) {
-            //session token returned
-            return jsonObjResponse.getString("sessionToken");
-        } else if (jsonObjResponse.has("factorResult")) {
-            if (jsonObjResponse.getString("sessionToken").equals("TIMEOUT")) {
-                //push factor timeout
-                return "timeout";
-            } else {
-                return "";
-            }
-        } else {
-            //Unsuccessful verification
-            return "";
-        }
-        */
-        return "";
-    }
-
 
     /*Handles factor selection based on factors found in parameter authResult, returns the selected factor
      */
