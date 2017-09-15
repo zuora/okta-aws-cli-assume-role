@@ -30,13 +30,6 @@ import com.amazonaws.services.identitymanagement.*;
 import com.amazonaws.services.identitymanagement.model.*;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.okta.sdk.clients.AuthApiClient;
-import com.okta.sdk.clients.FactorsApiClient;
-import com.okta.sdk.clients.UserApiClient;
-import com.okta.sdk.exceptions.ApiException;
-import com.okta.sdk.framework.ApiClientConfiguration;
-import com.okta.sdk.models.auth.AuthResult;
-import com.okta.sdk.models.factors.Factor;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
@@ -68,9 +61,6 @@ import java.nio.charset.*;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.LogManager;
 
-//Amazon SDK namespaces
-//Okta SDK namespaces
-
 public class awscli {
 
     private static final String SECOND_FACTOR_TOKEN_OPT = "tok";
@@ -92,13 +82,7 @@ public class awscli {
     private static String oktaAWSAppURL = "";
     private static String awsIamKey = null;
     private static String awsIamSecret = null;
-    private static AuthApiClient authClient;
 
-    private static final String DefaultProfileName = "default";
-
-    private static FactorsApiClient factorClient;
-    private static UserApiClient userClient;
-    private static String userId;
     private static String crossAccountRoleName = null;
     private static String roleToAssume; //the ARN of the role the user wants to eventually assume (not the cross-account role, the "real" role in the target account)
     private static int selectedPolicyRank; //the zero-based rank of the policy selected in the selected cross-account role (in case there is more than one policy tied to the current policy)
@@ -123,13 +107,11 @@ public class awscli {
         }
 
         // Step #1: Initiate the authentication and capture the SAML assertion.
-        CloseableHttpClient httpClient = null;
         String resultSAML = "";
         try {
-
             String strOktaSessionToken = oktaAuthntication();
             if (!strOktaSessionToken.equalsIgnoreCase(""))
-                //Step #2 get SAML assertion from Okta
+                // Step #2 get SAML assertion from Okta.
                 resultSAML = awsSamlHandler(strOktaSessionToken);
         } catch (MalformedURLException e) {
             e.printStackTrace();
@@ -143,18 +125,18 @@ public class awscli {
             e.printStackTrace();
         }
 
-        // Step #3: Assume an AWS role using the SAML Assertion from Okta
+        // Step #3: Assume an AWS role using the SAML Assertion from Okta.
         AssumeRoleWithSAMLResult assumeResult = assumeAWSRole(resultSAML);
 
         com.amazonaws.services.securitytoken.model.AssumedRoleUser aru = assumeResult.getAssumedRoleUser();
         String arn = aru.getArn();
 
 
-        // Step #4: Get the final role to assume and update the config file to add it to the user's profile
+        // Step #4: Get the final role to assume and update the config file to add it to the user's profile.
         GetRoleToAssume(crossAccountRoleName);
         logger.trace("Role to assume ARN: " + roleToAssume);
 
-        // Step #5: Write the credentials to ~/.aws/credentials
+        // Set profile name to default if it was not specified on the command line.
         String profileName;
         if (0 == args.length) {
             profileName = createDefaultProfileName(arn);
@@ -168,11 +150,11 @@ public class awscli {
             printUsage();
             return;
         }
+
+        // Step #5: Write the credentials to ~/.aws/credentials.
         setAWSCredentials(assumeResult, profileName);
 
         UpdateConfigFile(profileName, roleToAssume);
-        //Don't do this because it the user might not appreciate losing their current default profile information.
-        //UpdateConfigFile(DefaultProfileName, roleToAssume);
 
         // Print Final message
         if (null == cli) {
@@ -295,49 +277,21 @@ public class awscli {
 
     /* Parses application's config file for app URL and Okta Org */
     private static void extractCredentials() throws IOException {
-        //BufferedReader oktaBr = new BufferedReader(new FileReader(new File (System.getProperty("user.dir")) +"/oktaAWSCLI.config"));
-        //RL, 2016-02-25, moving to properties file
-        String strLocalFolder = System.getProperty("user.dir");
-        File propertiesFile = new File("config.properties");
-        FileReader reader = new FileReader(propertiesFile);
-        Properties props = new Properties();
-        props.load(reader);
-        //Properties configFile = new Properties();
-        //configFile.load(this.getClass().getClassLoader().getResourceAsStream("/config.properties"));
+        Properties properties = getOktaPropertiesFromLocalConfig();
 
-        //extract oktaOrg and oktaAWSAppURL from Okta settings file
-        oktaOrg = props.getProperty("OKTA_ORG");
-        oktaAWSAppURL = props.getProperty("OKTA_AWS_APP_URL");
-        awsIamKey = props.getProperty("AWS_IAM_KEY");
-        awsIamSecret = props.getProperty("AWS_IAM_SECRET");
-/*		String line = oktaBr.readLine();
-        while(line!=null){
-			if(line.contains("OKTA_ORG")){
-				oktaOrg = line.substring(line.indexOf("=")+1).trim();
-			}
-			else if( line.contains("OKTA_AWS_APP_URL")){
-				oktaAWSAppURL = line.substring(line.indexOf("=")+1).trim();
-			}
-			line = oktaBr.readLine();
-		}	
-		oktaBr.close();*/
+        // Extract oktaOrg and oktaAWSAppURL from Okta settings file.
+        oktaOrg = properties.getProperty("OKTA_ORG");
+        oktaAWSAppURL = properties.getProperty("OKTA_AWS_APP_URL");
+        awsIamKey = properties.getProperty("AWS_IAM_KEY");
+        awsIamSecret = properties.getProperty("AWS_IAM_SECRET");
     }
 
-    /*Uses user's credentials to obtain Okta session Token */
-    private static AuthResult authenticateCredentials(String username, String password) throws ApiException, JSONException, ClientProtocolException, IOException {
-
-        ApiClientConfiguration oktaSettings = new ApiClientConfiguration("https://" + oktaOrg, "");
-        AuthResult result = null;
-        authClient = new AuthApiClient(oktaSettings);
-        userClient = new UserApiClient(oktaSettings);
-        factorClient = new FactorsApiClient(oktaSettings);
-
-        // Check if the user credentials are valid
-        result = authClient.authenticate(username, password, "");
-        // The result has a getStatus method which is a string of status of the request.
-        // Example - SUCCESS for successful authentication
-        String status = result.getStatus();
-        return result;
+    private static Properties getOktaPropertiesFromLocalConfig() throws FileNotFoundException, IOException {
+        try(FileReader reader = new FileReader(new File("config.properties"))) {
+            Properties properties = new Properties();
+            properties.load(reader);
+            return properties;
+        }
     }
 
     /*Handles possible authentication failures */
@@ -627,21 +581,17 @@ public class awscli {
     }
 
     private static int SelectPolicy(List<String> lstPolicies) {
-        String strSelectedPolicy = null;
-
         System.out.println("\nPlease select a role policy: ");
 
-        //Gather list of policies for the selected role
+        // Gather list of policies for the selected role
         int i = 1;
         for (String strPolicyName : lstPolicies) {
             System.out.println("[ " + i + " ]: " + strPolicyName);
             i++;
         }
 
-        //Prompt user for policy selection
-        int selection = numSelection(lstPolicies.size());
-
-        return selection;
+        // Prompt user for policy selection
+        return numSelection(lstPolicies.size());
     }
 
     private static String ProcessPolicyDocument(String policyDoc) {
@@ -735,11 +685,8 @@ public class awscli {
         String awsSecretKey = temporaryCredentials.getAWSSecretKey();
         String awsSessionToken = temporaryCredentials.getSessionToken();
 
-        //update the credentials file with the unique profile name
+        // Update the credentials file with the unique profile name
         UpdateCredentialsFile(credentialsProfileName, awsAccessKey, awsSecretKey, awsSessionToken);
-        // Don't override the default profile, this may clobber existing credentials in there.
-        //also override the default profile
-        //UpdateCredentialsFile(DefaultProfileName, awsAccessKey, awsSecretKey, awsSessionToken);
     }
 
     private static String createDefaultProfileName(String credentialsProfileName) {
@@ -805,7 +752,6 @@ public class awscli {
 
         String line = null;
         int lineCounter = 0;
-        boolean bFileStart = true;
 
         //second, we're copying all the other profile from the original credentials file
         while ((line = br.readLine()) != null) {
@@ -1110,23 +1056,15 @@ public class awscli {
         return sessionToken;
     }
 
-
-    /*Handles push factor authentication
+    /* Handles push factor authentication
      *
      *
      */
     private static String pushFactor(JSONObject factor, String stateToken) throws ClientProtocolException, JSONException, IOException {
-        Calendar newTime = null;
-        Calendar time = Calendar.getInstance();
         String sessionToken = "";
 
         System.out.println("\nPush Factor Authentication");
         while ((null == sessionToken) || "".equals(sessionToken)) {
-            //System.out.println("Token: ");
-            //prints waiting tick marks
-            //if( time.compareTo(newTime) > 4000){
-            //    System.out.println("...");
-            //}
             //Verify if Okta Push has been pushed
             sessionToken = verifyAnswer(null, factor, stateToken, "push");
             System.out.println(sessionToken);
@@ -1134,8 +1072,6 @@ public class awscli {
                 System.out.println("Session has timed out");
                 return "timeout";
             }
-            time = newTime;
-            newTime = Calendar.getInstance();
         }
         return sessionToken;
     }
@@ -1261,108 +1197,6 @@ public class awscli {
             return pushResult;
     }
 
-    /*Handles factor selection based on factors found in parameter authResult, returns the selected factor
-     */
-    public static void selectFactor(AuthResult authResult) {
-        ArrayList<LinkedHashMap> factors = (ArrayList<LinkedHashMap>) authResult.getEmbedded().get("factors");
-        String factorType;
-        System.out.println("\nMulti-Factor authentication required. Please select a factor to use.");
-        //list factor to select from to user
-        System.out.println("Factors:");
-        for (int i = 0; i < factors.size(); i++) {
-            LinkedHashMap<String, Object> factor = factors.get(i);
-            //Factor factor = factors.get(i);
-            factorType = (String) factor.get("factorType");// factor.getFactorType();
-            if (factorType.equals("question")) {
-                factorType = "Security Question";
-            } else if (factorType.equals("sms")) {
-                factorType = "SMS Authentication";
-            } else if (factorType.equals("token:software:totp")) {
-                String provider = (String) factor.get("provider");//factor.getProvider();
-                if (provider.equals("GOOGLE")) {
-                    factorType = "Google Authenticator";
-                } else {
-                    factorType = "Okta Verify";
-                }
-            }
-            System.out.println("[ " + (i + 1) + " ] :" + factorType);
-        }
-
-        //Handles user factor selection
-        int selection = numSelection(factors.size());
-
-        //return factors.get(selection);
-    }
-
-    /*Handles MFA for users, returns an Okta session token if user is authenticated
-     * Precondition: question factor as JSONObject factor, current state token stateToken
-     * Postcondition: return session token as String sessionToken
-     */
-
-    private static String mfa(AuthResult authResult) throws IOException {
-/*
-        try {
-
-            //User selects which factor to use
-            Factor selectedFactor = selectFactor(authResult);
-            String factorType = selectedFactor.getFactorType();
-            String stateToken = authResult.getStateToken();
-
-            //factor selection handler
-            switch (factorType) {
-                case ("question"): {
-                    //question factor handler
-                    //String sessionToken = questionFactor(factor, stateToken);
-                    //if (sessionToken.equals("change factor")) {
-                    //    System.out.println("Factor Change Initiated");
-                    //    return mfa(authResponse);
-                    //}
-                    //return sessionToken;
-                }
-                case ("sms"): {
-                    //sms factor handler
-                    //String sessionToken = smsFactor(factor, stateToken);
-                    //if (sessionToken.equals("change factor")) {
-                    //    System.out.println("Factor Change Initiated");
-                    //    return mfa(authResponse);
-                    //}
-                    //return sessionToken;
-
-                }
-                case ("token:software:totp"): {
-                    //token factor handler
-                    String sessionToken = totpFactor(selectedFactor, stateToken);
-                    if (sessionToken.equals("change factor")) {
-                        System.out.println("Factor Change Initiated");
-                        return mfa(authResult);
-                    }
-                    return sessionToken;
-                }
-                case ("push"): {
-                    //push factor handles
-                    /*
-                    String result = pushFactor(factor, stateToken);
-                    if (result.equals("timeout") || result.equals("change factor")) {
-                        return mfa(authResponse);
-                    }
-                    return result;
-
-                }
-            }
-
-        } catch (JSONException e) {
-            e.printStackTrace();
-        } /*catch (ClientProtocolException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
-        } catch (IOException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
-        }
-*/
-        return "";
-    }
-
     /* prints final status message to user */
     private static void resultMessage(String profileName) {
         Calendar date = Calendar.getInstance();
@@ -1382,95 +1216,7 @@ public class awscli {
         System.out.println("----------------------------------------------------------------------------------------------------------------------");
     }
 
-    /* Authenticates users credentials via Okta, return Okta session token
-     * Postcondition: returns String oktaSessionToken
-     * */
-    private static String oktaAuthentication() throws ClientProtocolException, JSONException, IOException {
-
-        String strSessionToken = "";
-        AuthResult authResult = null;
-
-        int requestStatus = 0;
-        String strAuthStatus = "";
-
-        //Redo sequence if response from AWS doesn't return 200 Status
-        while (!strAuthStatus.equalsIgnoreCase("SUCCESS") && !strAuthStatus.equalsIgnoreCase("MFA_REQUIRED")) {
-
-            // Prompt for user credentials
-            System.out.print("Username: ");
-            //Scanner scanner = new Scanner(System.in);
-
-            String oktaUsername = null; //scanner.next();
-
-            Console console = System.console();
-            String oktaPassword = null;
-            if (console != null) {
-                oktaPassword = new String(console.readPassword("Password: "));
-            } else { // hack to be able to debug in an IDE
-                System.out.print("Password: ");
-            }
-            try {
-                authResult = authenticateCredentials(oktaUsername, oktaPassword);
-                strAuthStatus = authResult.getStatus();
-
-                if (strAuthStatus.equalsIgnoreCase("MFA_REQUIRED")) {
-                    if (userClient != null) {
-                        LinkedHashMap<String, Object> user = (LinkedHashMap<String, Object>) (authResult.getEmbedded().get("user"));
-                        userId = (String) user.get("id");
-
-                        //userId = user.getId();
-                            /*User user = userClient.getUser(oktaUsername);
-                            if(user!=null)
-                                userId = user.getId();*/
-                    }
-                }
-
-            } catch (ApiException apiException) {
-                String strEx = apiException.getMessage();
-
-                switch (apiException.getStatusCode()) {
-                    case 400:
-                    case 401:
-                        System.out.println("You provided invalid credentials, please try again.");
-                        break;
-                    case 500:
-                        System.out.println("\nUnable to establish connection with: " +
-                                oktaOrg + " \nPlease verify that your Okta org url is correct and try again");
-                        System.exit(0);
-                        break;
-                    default:
-                        throw new RuntimeException("Failed : HTTP error code : "
-                                + apiException.getStatusCode() + " Error code: " + apiException.getErrorResponse().getErrorCode() + " Error summary: " + apiException.getErrorResponse().getErrorSummary());
-
-                }
-            }
-            //requestStatus = responseAuthenticate.getStatusLine().getStatusCode();
-            //authnFailHandler(requestStatus, responseAuthenticate);
-        }
-
-
-        //Retrieve and parse the Okta response for session token
-            /*BufferedReader br = new BufferedReader(new InputStreamReader(
-                    (responseAuthenticate.getEntity().getContent())));
-
-            String outputAuthenticate = br.readLine();
-            JSONObject jsonObjResponse = new JSONObject(outputAuthenticate);
-
-            responseAuthenticate.close();*/
-
-        if (strAuthStatus.equalsIgnoreCase("MFA_REQUIRED")) {
-            return mfa(authResult);
-        }
-        //else {
-        //    return jsonObjResponse.getString("sessionToken");
-        //}
-
-        if (authResult != null)
-            strSessionToken = authResult.getSessionToken();
-        return strSessionToken;
-    }
-
-    static Options createCliOptions() {
+    private static Options createCliOptions() {
         Options options = new Options();
         options.addOption(Option.builder(PROFILE_OPT).argName("profile").longOpt("profile").hasArg(true)
                 .desc("The AWS profile used to write configuration and credentials on success.")
