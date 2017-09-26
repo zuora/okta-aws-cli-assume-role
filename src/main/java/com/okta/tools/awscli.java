@@ -16,6 +16,7 @@ import com.amazonaws.AmazonClientException;
 import com.amazonaws.auth.BasicAWSCredentials;
 import com.amazonaws.auth.BasicSessionCredentials;
 import com.amazonaws.auth.profile.ProfilesConfigFile;
+import com.amazonaws.auth.profile.internal.BasicProfile;
 import com.amazonaws.services.identitymanagement.model.GetPolicyRequest;
 import com.amazonaws.services.identitymanagement.model.GetPolicyResult;
 import com.amazonaws.services.identitymanagement.model.GetPolicyVersionRequest;
@@ -26,6 +27,7 @@ import com.amazonaws.services.identitymanagement.model.Policy;
 import com.amazonaws.services.securitytoken.AWSSecurityTokenServiceClient;
 import com.amazonaws.services.securitytoken.model.AssumeRoleWithSAMLRequest;
 import com.amazonaws.services.securitytoken.model.AssumeRoleWithSAMLResult;
+import com.amazonaws.util.StringUtils;
 import com.amazonaws.services.identitymanagement.*;
 import com.amazonaws.services.identitymanagement.model.*;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -93,10 +95,9 @@ public class awscli {
 
     public static void main(String[] args) throws Exception {
         awsSetup();
-        extractCredentials();
 
         cliOptions = createCliOptions();
-        if ((1 == args.length) && (args[0].equalsIgnoreCase("help") || args[0].equalsIgnoreCase("--help"))) {
+        if ((0 < args.length) && (args[0].equalsIgnoreCase("help") || args[0].equalsIgnoreCase("--help"))) {
             printUsage();
             System.exit(0);
         }
@@ -104,6 +105,19 @@ public class awscli {
         if (1 < args.length) {
             CommandLineParser parser = new DefaultParser();
             cli = parser.parse(cliOptions, args);
+        }
+
+        String profileName = null;
+        if (1 == args.length) {
+            profileName = args[0];
+        } else if ((null != cli) && cli.hasOption(PROFILE_OPT)) {
+            profileName = cli.getOptionValue(PROFILE_OPT);
+        }
+
+        if (null == profileName) {
+            extractCredentials();
+        } else {
+            extractCredentials(profileName);
         }
 
         // Step #1: Initiate the authentication and capture the SAML assertion.
@@ -127,28 +141,16 @@ public class awscli {
 
         // Step #3: Assume an AWS role using the SAML Assertion from Okta.
         AssumeRoleWithSAMLResult assumeResult = assumeAWSRole(resultSAML);
-
         com.amazonaws.services.securitytoken.model.AssumedRoleUser aru = assumeResult.getAssumedRoleUser();
         String arn = aru.getArn();
-
 
         // Step #4: Get the final role to assume and update the config file to add it to the user's profile.
         GetRoleToAssume(crossAccountRoleName);
         logger.trace("Role to assume ARN: " + roleToAssume);
 
         // Set profile name to default if it was not specified on the command line.
-        String profileName;
-        if (0 == args.length) {
+        if ((0 == args.length) && (null == profileName)) {
             profileName = createDefaultProfileName(arn);
-        } else if (1 == args.length) {
-            profileName = args[0];
-        } else if ((null != cli) && cli.hasOption(PROFILE_OPT)) {
-            profileName = cli.getOptionValue(PROFILE_OPT);
-        } else {
-            System.out.println("Incorrect usage. You can specify a single argument as the AWS CLI profile to write results to"
-                    + " or you can use the following command line options.");
-            printUsage();
-            return;
         }
 
         // Step #5: Write the credentials to ~/.aws/credentials.
@@ -292,6 +294,44 @@ public class awscli {
             properties.load(reader);
             return properties;
         }
+    }
+
+    private static void extractCredentials(String profileName) throws IOException {
+        Properties properties = getOktaPropertiesFromAwsProfile(profileName);
+
+        oktaOrg = properties.getProperty("OKTA_ORG");
+        oktaAWSAppURL = properties.getProperty("OKTA_AWS_APP_URL");
+        awsIamKey = properties.getProperty("AWS_IAM_KEY");
+        awsIamSecret = properties.getProperty("AWS_IAM_SECRET");
+    }
+
+    static Properties getOktaPropertiesFromAwsProfile(String profileName) throws FileNotFoundException, IOException {
+        ProfilesConfigFile awsProfilesConfigFile;
+        try {
+            awsProfilesConfigFile = new ProfilesConfigFile(new File("config.properties"));
+        } catch (IllegalArgumentException ex) {
+            System.err.println("The Okta configuration file is not in multiple profile format."
+                    + " Will try to load configuration in single profile mode.");
+            return getOktaPropertiesFromLocalConfig();
+        }
+        BasicProfile profile = awsProfilesConfigFile.getAllBasicProfiles().get(profileName);
+        String oktaOrg = profile.getPropertyValue("OKTA_ORG");
+        String oktaAwsAppUrl = profile.getPropertyValue("OKTA_AWS_APP_URL");
+        String oktaAwsIamKey = profile.getPropertyValue("AWS_IAM_KEY");
+        String oktaAwsIamSecret = profile.getPropertyValue("AWS_IAM_SECRET");
+
+        if (StringUtils.isNullOrEmpty(oktaOrg) || StringUtils.isNullOrEmpty(oktaAwsAppUrl)) {
+            System.err.println(String.format("Okta configuration does not exist, or is incomplete, for '%s' profile."
+                    + " Please check your config.properties file for errors. Will try to use default configuration.", profileName));
+            System.exit(1);
+        }
+
+        Properties properties = new Properties();
+        properties.put("OKTA_ORG", oktaOrg);
+        properties.put("OKTA_AWS_APP_URL", oktaAwsAppUrl);
+        properties.put("AWS_IAM_KEY", oktaAwsIamKey);
+        properties.put("AWS_IAM_SECRET", oktaAwsIamSecret);
+        return properties;
     }
 
     /*Handles possible authentication failures */
