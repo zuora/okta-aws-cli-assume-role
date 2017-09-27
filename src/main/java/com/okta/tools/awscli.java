@@ -115,7 +115,7 @@ public class awscli {
         }
 
         if (null == profileName) {
-            extractCredentials();
+            profileName = extractCredentials();
         } else {
             extractCredentials(profileName);
         }
@@ -166,7 +166,13 @@ public class awscli {
 
     private static void printUsage() {
         HelpFormatter formatter = new HelpFormatter();
-        formatter.printHelp("okta-aws-login", cliOptions );
+        String preamble = "\n"
+                + "The okta-aws-login supports multiple AWS accounts through configuration\n"
+                + "profiles in the local config.properties file. To switch profiles use\n"
+                + "the --profile (or -p) command line option followed by the name of the\n"
+                + "desired profile. The profiles in the okta-aws-login config.properties\n"
+                + "file correspond with the profiles in your AWS config file.\n\n";
+        formatter.printHelp(preamble, cliOptions );
     }
 
     /* Authenticates users credentials via Okta, return Okta session token
@@ -278,14 +284,40 @@ public class awscli {
     }
 
     /* Parses application's config file for app URL and Okta Org */
-    private static void extractCredentials() throws IOException {
-        Properties properties = getOktaPropertiesFromLocalConfig();
+    private static String extractCredentials() throws IOException {
+        Properties properties;
+        String profileName = null;
+        try {
+            profileName = resolveProfileName();
+            properties = getOktaPropertiesFromAwsProfile(profileName);
+        } catch (IllegalArgumentException ex) {
+            properties = getOktaPropertiesFromLocalConfig();
+        }
 
         // Extract oktaOrg and oktaAWSAppURL from Okta settings file.
         oktaOrg = properties.getProperty("OKTA_ORG");
         oktaAWSAppURL = properties.getProperty("OKTA_AWS_APP_URL");
         awsIamKey = properties.getProperty("AWS_IAM_KEY");
         awsIamSecret = properties.getProperty("AWS_IAM_SECRET");
+        return profileName;
+    }
+
+    static String resolveProfileName() {
+        ProfilesConfigFile awsProfilesConfigFile = new ProfilesConfigFile(new File("config.properties"));
+        Set<String> keySet = awsProfilesConfigFile.getAllBasicProfiles().keySet();
+        String keySetArray[] = keySet.toArray(new String[keySet.size()]);
+        if (1 > keySetArray.length) {
+            throw new IllegalStateException("The Okta configuration file is empty.");
+        } else if (1 == keySetArray.length) {
+            return keySetArray[0];
+        } else {
+            System.out.println("Your config.properties file contains multiple profiles, please select one:");
+            for (int i = 0; i < keySetArray.length; i++) {
+                System.out.println(String.format("[%d] %s", i+1, keySetArray[i]));
+            }
+            int selection = numSelection(keySetArray.length);
+            return keySetArray[selection];
+        }
     }
 
     private static Properties getOktaPropertiesFromLocalConfig() throws FileNotFoundException, IOException {
@@ -314,6 +346,11 @@ public class awscli {
                     + " Will try to load configuration in single profile mode.");
             return getOktaPropertiesFromLocalConfig();
         }
+        return getProfilePropertiesFromConfigFile(profileName, awsProfilesConfigFile);
+    }
+
+    private static Properties getProfilePropertiesFromConfigFile(String profileName,
+            ProfilesConfigFile awsProfilesConfigFile) {
         BasicProfile profile = awsProfilesConfigFile.getAllBasicProfiles().get(profileName);
         String oktaOrg = profile.getPropertyValue("OKTA_ORG");
         String oktaAwsAppUrl = profile.getPropertyValue("OKTA_AWS_APP_URL");
@@ -865,14 +902,12 @@ public class awscli {
         }
     }
 
-    public static void WriteNewProfile(PrintWriter pw, String profileNameLine, String awsAccessKey, String awsSecretKey, String awsSessionToken) {
-
+    public static void WriteNewProfile(PrintWriter pw, String profileNameLine, String awsAccessKey, String awsSecretKey,
+            String awsSessionToken) {
         pw.println(profileNameLine);
         pw.println("aws_access_key_id=" + awsAccessKey);
         pw.println("aws_secret_access_key=" + awsSecretKey);
         pw.println("aws_session_token=" + awsSessionToken);
-        //pw.println();
-        //pw.println();
     }
 
     public static void WriteNewRoleToAssume(PrintWriter pw, String profileName, String roleToAssume) {
