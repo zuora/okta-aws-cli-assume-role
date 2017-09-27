@@ -828,18 +828,23 @@ public class awscli {
         WriteNewProfile(pw, profileNameLine, awsAccessKey, awsSecretKey, awsSessionToken);
 
         String line = null;
-        int lineCounter = 0;
-
+        boolean inProfile = false;
         //second, we're copying all the other profile from the original credentials file
         while ((line = br.readLine()) != null) {
-
-            if (line.equalsIgnoreCase(profileNameLine) || (lineCounter > 0 && lineCounter < 4)) {
-                //we found the line we must replace and we will skip 3 additional lines
-                ++lineCounter;
+            if (line.equalsIgnoreCase(profileNameLine)) {
+                inProfile = true;
+            } else if (line.startsWith("[")) {
+                inProfile = false;
+            }
+            if (inProfile && (line.equalsIgnoreCase(profileNameLine) || line.startsWith("aws_access_key_id=")
+                    || line.startsWith("aws_secret_access_key=") || line.startsWith("aws_session_token=")
+                    || line.startsWith("aws_security_token="))) {
+                continue;
             } else {
                 if ((!line.equalsIgnoreCase("") && !line.equalsIgnoreCase("\n"))) {
                     if (line.startsWith("[")) {
-                        //this is the start of a new profile, so we're adding a separator line
+                        // this is the start of a new profile, so we're adding a
+                        // separator line
                         pw.println();
                     }
                     pw.println(line);
@@ -908,6 +913,10 @@ public class awscli {
         pw.println("aws_access_key_id=" + awsAccessKey);
         pw.println("aws_secret_access_key=" + awsSecretKey);
         pw.println("aws_session_token=" + awsSessionToken);
+        // Some older libraries (in particular boto2, used by ansible) look for
+        // Amazon's session token under variable named `aws_security_token`,
+        // rather than `aws_session_token`.
+        pw.println("aws_security_token=" + awsSessionToken);
     }
 
     public static void WriteNewRoleToAssume(PrintWriter pw, String profileName, String roleToAssume) {
