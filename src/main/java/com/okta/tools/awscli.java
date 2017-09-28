@@ -13,10 +13,14 @@
 package com.okta.tools;
 
 import com.amazonaws.AmazonClientException;
+import com.amazonaws.auth.AWSCredentials;
+import com.amazonaws.auth.AWSCredentialsProvider;
 import com.amazonaws.auth.BasicAWSCredentials;
 import com.amazonaws.auth.BasicSessionCredentials;
 import com.amazonaws.auth.profile.ProfilesConfigFile;
+import com.amazonaws.auth.profile.ProfilesConfigFileWriter;
 import com.amazonaws.auth.profile.internal.BasicProfile;
+import com.amazonaws.auth.profile.internal.Profile;
 import com.amazonaws.services.identitymanagement.model.GetPolicyRequest;
 import com.amazonaws.services.identitymanagement.model.GetPolicyResult;
 import com.amazonaws.services.identitymanagement.model.GetPolicyVersionRequest;
@@ -28,6 +32,7 @@ import com.amazonaws.services.securitytoken.AWSSecurityTokenServiceClient;
 import com.amazonaws.services.securitytoken.model.AssumeRoleWithSAMLRequest;
 import com.amazonaws.services.securitytoken.model.AssumeRoleWithSAMLResult;
 import com.amazonaws.util.StringUtils;
+import com.amazonaws.services.codepipeline.model.AWSSessionCredentials;
 import com.amazonaws.services.identitymanagement.*;
 import com.amazonaws.services.identitymanagement.model.*;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -792,21 +797,21 @@ public class awscli {
         try {
             profilesConfigFile = new ProfilesConfigFile();
         } catch (AmazonClientException ace) {
-            PopulateCredentialsFile(profileNameWithBrackets, awsAccessKey, awsSecretKey, awsSessionToken);
+            PopulateCredentialsFile2(profileName, awsAccessKey, awsSecretKey, awsSessionToken);
         }
 
         try {
             if (profilesConfigFile != null && profilesConfigFile.getCredentials(profileName) != null) {
                 //if we end up here, it means we were  able to find a matching profile
-                PopulateCredentialsFile(profileNameWithBrackets, awsAccessKey, awsSecretKey, awsSessionToken);
+                PopulateCredentialsFile2(profileName, awsAccessKey, awsSecretKey, awsSessionToken);
             }
         } catch (AmazonClientException ace) {
             //this could happen if the default profile doesn't have a valid AWS Access Key ID
             //in this case, error would be "Unable to load credentials into profile [default]: AWS Access Key ID is not specified."
-            PopulateCredentialsFile(profileNameWithBrackets, awsAccessKey, awsSecretKey, awsSessionToken);
+            PopulateCredentialsFile2(profileName, awsAccessKey, awsSecretKey, awsSessionToken);
         } catch (IllegalArgumentException iae) {
             //if we end up here, it means we were not able to find a matching profile so we need to append one
-            PopulateCredentialsFile(profileNameWithBrackets, awsAccessKey, awsSecretKey, awsSessionToken);
+            PopulateCredentialsFile2(profileName, awsAccessKey, awsSecretKey, awsSessionToken);
             //FileWriter fileWriter = new FileWriter(System.getProperty("user.home") + "/.aws/credentials", true);
             //TODO: need to be updated to work with Windows
             //PrintWriter writer = new PrintWriter(fileWriter);
@@ -815,7 +820,7 @@ public class awscli {
         }
     }
 
-    private static void PopulateCredentialsFile(String profileNameLine, String awsAccessKey, String awsSecretKey, String awsSessionToken)
+    private static void PopulateCredentialsFile3(String profileNameLine, String awsAccessKey, String awsSecretKey, String awsSessionToken)
             throws IOException {
 
         File inFile = new File(System.getProperty("user.home") + "/.aws/credentials");
@@ -865,6 +870,42 @@ public class awscli {
         if (!tempFile.renameTo(inFile)) {
             System.out.println("Could not rename file");
         }
+    }
+
+    private static void PopulateCredentialsFile2(String profileName, String awsAccessKey, String awsSecretKey, String awsSessionToken)
+            throws IOException {
+
+        File credentialsFile = new File(System.getProperty("user.home") + "/.aws/credentials");
+
+        BasicSessionCredentials awsCredentials = new BasicSessionCredentials(awsAccessKey, awsSecretKey, awsSessionToken);
+        AWSCredentialsProvider awsCredentialsProvider = new AWSCredentialsProvider() {
+            
+            @Override
+            public void refresh() {
+                // do nothing
+            }
+            
+            @Override
+            public AWSCredentials getCredentials() {
+                return awsCredentials;
+            }
+        };
+
+        Map<String, String> properties = new HashMap<>();
+        properties.put("aws_access_key_id", awsAccessKey);
+        properties.put("aws_secret_access_key", awsSecretKey);
+        properties.put("aws_session_token", awsSessionToken);
+        properties.put("aws_security_token", awsSessionToken);
+
+        Profile awsCredentialsProfile = new Profile(profileName, properties, null);
+
+//        Profile awsCredentialsProfile = awsProfilesConfigFile.getAllProfiles().get(profileName);
+//        awsCredentialsProfile.getProperties().put("aws_access_key_id", awsAccessKey);
+//        awsCredentialsProfile.getProperties().put("aws_secret_access_key", awsSecretKey);
+//        awsCredentialsProfile.getProperties().put("aws_session_token", awsSessionToken);
+//        awsCredentialsProfile.getProperties().put("aws_security_token", awsSessionToken);
+
+        ProfilesConfigFileWriter.modifyOneProfile(credentialsFile, profileName, awsCredentialsProfile);
     }
 
     private static void UpdateConfigFile(String profileName, String roleToAssume) throws IOException {
