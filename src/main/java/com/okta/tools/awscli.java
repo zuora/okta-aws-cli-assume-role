@@ -12,31 +12,34 @@
 
 package com.okta.tools;
 
-import com.amazonaws.AmazonClientException;
-import com.amazonaws.auth.AWSCredentials;
-import com.amazonaws.auth.AWSCredentialsProvider;
-import com.amazonaws.auth.BasicAWSCredentials;
-import com.amazonaws.auth.BasicSessionCredentials;
-import com.amazonaws.auth.profile.ProfilesConfigFile;
-import com.amazonaws.auth.profile.ProfilesConfigFileWriter;
-import com.amazonaws.auth.profile.internal.BasicProfile;
-import com.amazonaws.auth.profile.internal.Profile;
-import com.amazonaws.services.identitymanagement.model.GetPolicyRequest;
-import com.amazonaws.services.identitymanagement.model.GetPolicyResult;
-import com.amazonaws.services.identitymanagement.model.GetPolicyVersionRequest;
-import com.amazonaws.services.identitymanagement.model.GetPolicyVersionResult;
-import com.amazonaws.services.identitymanagement.model.GetRoleRequest;
-import com.amazonaws.services.identitymanagement.model.GetRoleResult;
-import com.amazonaws.services.identitymanagement.model.Policy;
-import com.amazonaws.services.securitytoken.AWSSecurityTokenServiceClient;
-import com.amazonaws.services.securitytoken.model.AssumeRoleWithSAMLRequest;
-import com.amazonaws.services.securitytoken.model.AssumeRoleWithSAMLResult;
-import com.amazonaws.util.StringUtils;
-import com.amazonaws.services.codepipeline.model.AWSSessionCredentials;
-import com.amazonaws.services.identitymanagement.*;
-import com.amazonaws.services.identitymanagement.model.*;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.BufferedReader;
+import java.io.Console;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.PrintWriter;
+import java.io.UnsupportedEncodingException;
+import java.net.MalformedURLException;
+import java.net.URLDecoder;
+import java.net.UnknownHostException;
+import java.nio.charset.StandardCharsets;
+import java.text.MessageFormat;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Calendar;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.InputMismatchException;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Scanner;
+import java.util.Set;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.CommandLineParser;
@@ -52,21 +55,40 @@ import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.io.*;
-import java.net.MalformedURLException;
-import java.net.URLDecoder;
-import java.net.UnknownHostException;
-import java.text.MessageFormat;
-import java.text.SimpleDateFormat;
-import java.util.*;
-import java.nio.charset.*;
-
-import org.apache.logging.log4j.Logger;
-import org.apache.logging.log4j.LogManager;
+import com.amazonaws.AmazonClientException;
+import com.amazonaws.auth.BasicAWSCredentials;
+import com.amazonaws.auth.BasicSessionCredentials;
+import com.amazonaws.auth.profile.ProfilesConfigFile;
+import com.amazonaws.auth.profile.internal.BasicProfile;
+import com.amazonaws.auth.profile.internal.ProfileKeyConstants;
+import com.amazonaws.services.identitymanagement.AmazonIdentityManagementClient;
+import com.amazonaws.services.identitymanagement.model.AttachedPolicy;
+import com.amazonaws.services.identitymanagement.model.GetPolicyRequest;
+import com.amazonaws.services.identitymanagement.model.GetPolicyResult;
+import com.amazonaws.services.identitymanagement.model.GetPolicyVersionRequest;
+import com.amazonaws.services.identitymanagement.model.GetPolicyVersionResult;
+import com.amazonaws.services.identitymanagement.model.GetRolePolicyRequest;
+import com.amazonaws.services.identitymanagement.model.GetRolePolicyResult;
+import com.amazonaws.services.identitymanagement.model.GetRoleRequest;
+import com.amazonaws.services.identitymanagement.model.GetRoleResult;
+import com.amazonaws.services.identitymanagement.model.ListAttachedRolePoliciesRequest;
+import com.amazonaws.services.identitymanagement.model.ListAttachedRolePoliciesResult;
+import com.amazonaws.services.identitymanagement.model.ListRolePoliciesRequest;
+import com.amazonaws.services.identitymanagement.model.ListRolePoliciesResult;
+import com.amazonaws.services.identitymanagement.model.Policy;
+import com.amazonaws.services.identitymanagement.model.Role;
+import com.amazonaws.services.securitytoken.AWSSecurityTokenServiceClient;
+import com.amazonaws.services.securitytoken.model.AssumeRoleWithSAMLRequest;
+import com.amazonaws.services.securitytoken.model.AssumeRoleWithSAMLResult;
+import com.amazonaws.util.StringUtils;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 public class awscli {
 
@@ -790,122 +812,42 @@ public class awscli {
             throws IOException {
 
         ProfilesConfigFile profilesConfigFile = null;
-        Object[] args = {new String(profileName)};
-        MessageFormat profileNameFormatWithBrackets = new MessageFormat("[{0}]");
-        String profileNameWithBrackets = profileNameFormatWithBrackets.format(args);
 
         try {
             profilesConfigFile = new ProfilesConfigFile();
         } catch (AmazonClientException ace) {
-            PopulateCredentialsFile2(profileName, awsAccessKey, awsSecretKey, awsSessionToken);
+            PopulateCredentialsFile(profileName, awsAccessKey, awsSecretKey, awsSessionToken);
         }
 
         try {
             if (profilesConfigFile != null && profilesConfigFile.getCredentials(profileName) != null) {
                 //if we end up here, it means we were  able to find a matching profile
-                PopulateCredentialsFile2(profileName, awsAccessKey, awsSecretKey, awsSessionToken);
+                PopulateCredentialsFile(profileName, awsAccessKey, awsSecretKey, awsSessionToken);
             }
         } catch (AmazonClientException ace) {
             //this could happen if the default profile doesn't have a valid AWS Access Key ID
             //in this case, error would be "Unable to load credentials into profile [default]: AWS Access Key ID is not specified."
-            PopulateCredentialsFile2(profileName, awsAccessKey, awsSecretKey, awsSessionToken);
+            PopulateCredentialsFile(profileName, awsAccessKey, awsSecretKey, awsSessionToken);
         } catch (IllegalArgumentException iae) {
             //if we end up here, it means we were not able to find a matching profile so we need to append one
-            PopulateCredentialsFile2(profileName, awsAccessKey, awsSecretKey, awsSessionToken);
-            //FileWriter fileWriter = new FileWriter(System.getProperty("user.home") + "/.aws/credentials", true);
-            //TODO: need to be updated to work with Windows
-            //PrintWriter writer = new PrintWriter(fileWriter);
-            //WriteNewProfile(writer, profileNameWithBrackets, awsAccessKey, awsSecretKey, awsSessionToken);
-            //fileWriter.close();
+            PopulateCredentialsFile(profileName, awsAccessKey, awsSecretKey, awsSessionToken);
         }
     }
 
-    private static void PopulateCredentialsFile3(String profileNameLine, String awsAccessKey, String awsSecretKey, String awsSessionToken)
-            throws IOException {
-
-        File inFile = new File(System.getProperty("user.home") + "/.aws/credentials");
-        FileInputStream fis = new FileInputStream(inFile);
-        BufferedReader br = new BufferedReader(new InputStreamReader(fis));
-        File tempFile = new File(inFile.getAbsolutePath() + ".tmp");
-        PrintWriter pw = new PrintWriter(new FileWriter(tempFile));
-
-        //first, we add our refreshed profile
-        WriteNewProfile(pw, profileNameLine, awsAccessKey, awsSecretKey, awsSessionToken);
-
-        String line = null;
-        boolean inProfile = false;
-        //second, we're copying all the other profile from the original credentials file
-        while ((line = br.readLine()) != null) {
-            if (line.equalsIgnoreCase(profileNameLine)) {
-                inProfile = true;
-            } else if (line.startsWith("[")) {
-                inProfile = false;
-            }
-            if (inProfile && (line.equalsIgnoreCase(profileNameLine) || line.startsWith("aws_access_key_id=")
-                    || line.startsWith("aws_secret_access_key=") || line.startsWith("aws_session_token=")
-                    || line.startsWith("aws_security_token="))) {
-                continue;
-            } else {
-                if ((!line.equalsIgnoreCase("") && !line.equalsIgnoreCase("\n"))) {
-                    if (line.startsWith("[")) {
-                        // this is the start of a new profile, so we're adding a
-                        // separator line
-                        pw.println();
-                    }
-                    pw.println(line);
-                }
-            }
-        }
-
-        pw.flush();
-        pw.close();
-        br.close();
-
-        //delete the original credentials file
-        if (!inFile.delete()) {
-            System.out.println("Could not delete original credentials file");
-        }
-
-        // Rename the new file to the filename the original file had.
-        if (!tempFile.renameTo(inFile)) {
-            System.out.println("Could not rename file");
-        }
-    }
-
-    private static void PopulateCredentialsFile2(String profileName, String awsAccessKey, String awsSecretKey, String awsSessionToken)
-            throws IOException {
+    private static void PopulateCredentialsFile(String profileName, String awsAccessKey, String awsSecretKey,
+            String awsSessionToken) throws IOException {
 
         File credentialsFile = new File(System.getProperty("user.home") + "/.aws/credentials");
 
-        BasicSessionCredentials awsCredentials = new BasicSessionCredentials(awsAccessKey, awsSecretKey, awsSessionToken);
-        AWSCredentialsProvider awsCredentialsProvider = new AWSCredentialsProvider() {
-            
-            @Override
-            public void refresh() {
-                // do nothing
-            }
-            
-            @Override
-            public AWSCredentials getCredentials() {
-                return awsCredentials;
-            }
-        };
-
         Map<String, String> properties = new HashMap<>();
-        properties.put("aws_access_key_id", awsAccessKey);
-        properties.put("aws_secret_access_key", awsSecretKey);
-        properties.put("aws_session_token", awsSessionToken);
+        properties.put(ProfileKeyConstants.AWS_ACCESS_KEY_ID, awsAccessKey);
+        properties.put(ProfileKeyConstants.AWS_SECRET_ACCESS_KEY, awsSecretKey);
+        properties.put(ProfileKeyConstants.AWS_SESSION_TOKEN, awsSessionToken);
         properties.put("aws_security_token", awsSessionToken);
 
-        Profile awsCredentialsProfile = new Profile(profileName, properties, null);
-
-//        Profile awsCredentialsProfile = awsProfilesConfigFile.getAllProfiles().get(profileName);
-//        awsCredentialsProfile.getProperties().put("aws_access_key_id", awsAccessKey);
-//        awsCredentialsProfile.getProperties().put("aws_secret_access_key", awsSecretKey);
-//        awsCredentialsProfile.getProperties().put("aws_session_token", awsSessionToken);
-//        awsCredentialsProfile.getProperties().put("aws_security_token", awsSessionToken);
-
-        ProfilesConfigFileWriter.modifyOneProfile(credentialsFile, profileName, awsCredentialsProfile);
+        BasicProfile awsCredentialsProfile = new BasicProfile(profileName, properties);
+        BackwardCompatibleProfilesConfigFileWriter.modifyOneProfile(credentialsFile, profileName,
+                SdkProfilesFactory.convert(awsCredentialsProfile));
     }
 
     private static void UpdateConfigFile(String profileName, String roleToAssume) throws IOException {
