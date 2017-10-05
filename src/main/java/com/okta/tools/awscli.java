@@ -104,7 +104,7 @@ public class awscli {
 
     private static final String PROFILE_OPT = "p";
 
-    private static Set<String> SUPPORTED_2FA = new HashSet<String>(Arrays.asList(new String[] { "google" }));
+    private static final Set<String> SUPPORTED_2FA = new HashSet<String>(Arrays.asList(new String[] { "google" }));
 
     //User specific variables
     private static String oktaOrg = "";
@@ -120,74 +120,91 @@ public class awscli {
     private static CommandLine cli;
     private static Options cliOptions;
 
+    private static Scanner scanner;
+
     public static void main(String[] args) throws Exception {
-        awsSetup();
-
-        cliOptions = createCliOptions();
-        if ((0 < args.length) && (args[0].equalsIgnoreCase("help") || args[0].equalsIgnoreCase("--help"))) {
-            printUsage();
-            System.exit(0);
-        }
-
-        if (1 < args.length) {
-            CommandLineParser parser = new DefaultParser();
-            cli = parser.parse(cliOptions, args);
-        }
-
-        String profileName = null;
-        if (1 == args.length) {
-            profileName = args[0];
-        } else if ((null != cli) && cli.hasOption(PROFILE_OPT)) {
-            profileName = cli.getOptionValue(PROFILE_OPT);
-        }
-
-        if (null == profileName) {
-            profileName = extractCredentials();
-        } else {
-            extractCredentials(profileName);
-        }
-
-        // Step #1: Initiate the authentication and capture the SAML assertion.
-        String resultSAML = "";
+        scanner = new Scanner(System.in);
         try {
-            String strOktaSessionToken = oktaAuthntication();
-            if (!strOktaSessionToken.equalsIgnoreCase(""))
+            awsSetup();
+
+            cliOptions = createCliOptions();
+            if ((0 < args.length) && (args[0].equalsIgnoreCase("help") || args[0].equalsIgnoreCase("--help"))) {
+                printUsage();
+                System.exit(0);
+            }
+
+            if (1 < args.length) {
+                CommandLineParser parser = new DefaultParser();
+                cli = parser.parse(cliOptions, args);
+            }
+
+            String profileName = null;
+            if (1 == args.length) {
+                profileName = args[0];
+            } else if ((null != cli) && cli.hasOption(PROFILE_OPT)) {
+                profileName = cli.getOptionValue(PROFILE_OPT);
+            }
+
+            if (null == profileName) {
+                profileName = extractCredentials();
+            } else {
+                extractCredentials(profileName);
+            }
+
+            String resultSAML = "";
+            try {
+                // Step #1: Initiate the authentication and capture the SAML assertion.
+                String strOktaSessionToken = oktaAuthntication();
+
+                if (strOktaSessionToken.equalsIgnoreCase("")) {
+                    logger.error("\nOkta authentication did not return a token.");
+                    System.exit(1);
+                }
+
                 // Step #2 get SAML assertion from Okta.
                 resultSAML = awsSamlHandler(strOktaSessionToken);
-        } catch (MalformedURLException e) {
-            e.printStackTrace();
-        } catch (UnknownHostException e) {
-            logger.error("\nUnable to establish a connection with AWS. \nPlease verify that your OKTA_AWS_APP_URL parameter is correct and try again");
-            System.exit(0);
-        } catch (ClientProtocolException e) {
-            logger.error("\nNo Org found, please specify an OKTA_ORG parameter in your config.properties file");
-            System.exit(0);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+            } catch (MalformedURLException e) {
+                logger.error("\nThe login URL is malformed.", e);
+                System.exit(1);
+            } catch (UnknownHostException e) {
+                logger.error("\nUnable to establish a connection with AWS.\n"
+                        + "Please verify that your OKTA_AWS_APP_URL parameter is correct and try again", e);
+                System.exit(1);
+            } catch (ClientProtocolException e) {
+                logger.error("\nNo Org found, please specify an OKTA_ORG parameter in your config.properties file", e);
+                System.exit(1);
+            } catch (IOException e) {
+                logger.error("\nAn IO error occurred.", e);
+                System.exit(1);
+            }
 
-        // Step #3: Assume an AWS role using the SAML Assertion from Okta.
-        AssumeRoleWithSAMLResult assumeResult = assumeAWSRole(resultSAML);
-        com.amazonaws.services.securitytoken.model.AssumedRoleUser aru = assumeResult.getAssumedRoleUser();
-        String arn = aru.getArn();
+            // Step #3: Assume an AWS role using the SAML Assertion from Okta.
+            AssumeRoleWithSAMLResult assumeResult = assumeAWSRole(resultSAML);
+            com.amazonaws.services.securitytoken.model.AssumedRoleUser aru = assumeResult.getAssumedRoleUser();
+            String arn = aru.getArn();
 
-        // Step #4: Get the final role to assume and update the config file to add it to the user's profile.
-        GetRoleToAssume(crossAccountRoleName);
-        logger.trace("Role to assume ARN: " + roleToAssume);
+            // Step #4: Get the final role to assume and update the config file to add it to the user's profile.
+            getRoleToAssume(crossAccountRoleName);
+            logger.trace("Role to assume ARN: " + roleToAssume);
 
-        // Set profile name to default if it was not specified on the command line.
-        if ((0 == args.length) && (null == profileName)) {
-            profileName = createDefaultProfileName(arn);
-        }
+            // Set profile name to default if it was not specified on the command line.
+            if ((0 == args.length) && (null == profileName)) {
+                profileName = createDefaultProfileName(arn);
+            }
 
-        // Step #5: Write the credentials to ~/.aws/credentials.
-        setAWSCredentials(assumeResult, profileName);
+            // Step #5: Write the credentials to ~/.aws/credentials.
+            setAWSCredentials(assumeResult, profileName);
 
-        UpdateConfigFile(profileName, roleToAssume);
+            updateConfigFile(profileName, roleToAssume);
 
-        // Print Final message
-        if (null == cli) {
-            resultMessage(profileName);
+            // Print the final message
+            if (null == cli) {
+                resultMessage(profileName);
+            }
+        } finally {
+            if (null != scanner) {
+                scanner.close();
+            }
         }
     }
 
@@ -206,7 +223,6 @@ public class awscli {
      * Postcondition: returns String oktaSessionToken
      * */
     private static String oktaAuthntication() throws ClientProtocolException, JSONException, IOException {
-        Scanner scanner = new Scanner(System.in);
         CloseableHttpResponse responseAuthenticate = null;
         int requestStatus = 0;
 
@@ -453,7 +469,6 @@ public class awscli {
     private static int numSelection(int max) {
         int selection = -1;
 
-        Scanner scanner = new Scanner(System.in);
         while (selection == -1) {
             //prompt user for selection
             System.out.print("Selection: ");
@@ -603,7 +618,7 @@ public class awscli {
         return null;
     }
 
-    private static void GetRoleToAssume(String roleName) {
+    private static void getRoleToAssume(String roleName) {
 
         if (roleName != null && !roleName.equals("") && awsIamKey != null && awsIamSecret != null && !awsIamKey.equals("") && !awsIamSecret.equals("")) {
 
@@ -644,7 +659,7 @@ public class awscli {
 
                     logger.debug("Managed Policies: " + managedPolicies.toString());
 
-                    selectedPolicyRank = SelectPolicy(lstManagedPolicies);
+                    selectedPolicyRank = selectPolicy(lstManagedPolicies);
                 }
 
                 AttachedPolicy attachedPolicy = managedPolicies.get(selectedPolicyRank);
@@ -660,7 +675,7 @@ public class awscli {
 
                 String policyDoc = pvr.getPolicyVersion().getDocument();
 
-                roleToAssume = ProcessPolicyDocument(policyDoc);
+                roleToAssume = processPolicyDocument(policyDoc);
             } else if (inlinePolicies.size() >= 1) //processing inline policies if we have no managed policies
             {
                 logger.debug("Inline Policies " + inlinePolicies.toString());
@@ -670,7 +685,7 @@ public class awscli {
 
                     logger.debug("Inline Policies: " + inlinePolicies.toString());
 
-                    selectedPolicyRank = SelectPolicy(inlinePolicies);
+                    selectedPolicyRank = selectPolicy(inlinePolicies);
                 }
 
                 //Have to set the role name and the policy name (both are mandatory fields
@@ -679,12 +694,12 @@ public class awscli {
                 GetRolePolicyResult rpr = identityManagementClient.getRolePolicy(grpr);
                 String policyDoc = rpr.getPolicyDocument();
 
-                roleToAssume = ProcessPolicyDocument(policyDoc);
+                roleToAssume = processPolicyDocument(policyDoc);
             }
         }
     }
 
-    private static int SelectPolicy(List<String> lstPolicies) {
+    private static int selectPolicy(List<String> lstPolicies) {
         System.out.println("\nPlease select a role policy: ");
 
         // Gather list of policies for the selected role
@@ -698,7 +713,7 @@ public class awscli {
         return numSelection(lstPolicies.size());
     }
 
-    private static String ProcessPolicyDocument(String policyDoc) {
+    private static String processPolicyDocument(String policyDoc) {
 
         String strRoleToAssume = null;
         try {
@@ -734,7 +749,7 @@ public class awscli {
                         for (final JsonNode node : resource) {
                             lstRoles.add(node.asText());
                         }
-                        strRoleToAssume = SelectRole(lstRoles);
+                        strRoleToAssume = selectRole(lstRoles);
                     } else {
                         strRoleToAssume = resource.textValue();
                         logger.debug("Role to assume: " + roleToAssume);
@@ -750,7 +765,7 @@ public class awscli {
 
     /* Prompts the user to select a role in case the role policy contains an array of roles instead of a single role
     */
-    private static String SelectRole(List<String> lstRoles) {
+    private static String selectRole(List<String> lstRoles) {
         String strSelectedRole = null;
 
         System.out.println("\nPlease select the role you want to assume: ");
@@ -767,7 +782,7 @@ public class awscli {
 
         if (selection < 0 && lstRoles.size() > selection) {
             System.out.println("\nYou entered an invalid number. Please try again.");
-            return SelectRole(lstRoles);
+            return selectRole(lstRoles);
         }
 
         strSelectedRole = lstRoles.get(selection);
@@ -790,7 +805,7 @@ public class awscli {
         String awsSessionToken = temporaryCredentials.getSessionToken();
 
         // Update the credentials file with the unique profile name
-        UpdateCredentialsFile(credentialsProfileName, awsAccessKey, awsSecretKey, awsSessionToken);
+        updateCredentialsFile(credentialsProfileName, awsAccessKey, awsSecretKey, awsSessionToken);
     }
 
     private static String createDefaultProfileName(String credentialsProfileName) {
@@ -808,7 +823,7 @@ public class awscli {
         return credentialsProfileName;
     }
 
-    private static void UpdateCredentialsFile(String profileName, String awsAccessKey, String awsSecretKey, String awsSessionToken)
+    private static void updateCredentialsFile(String profileName, String awsAccessKey, String awsSecretKey, String awsSessionToken)
             throws IOException {
 
         ProfilesConfigFile profilesConfigFile = null;
@@ -816,25 +831,25 @@ public class awscli {
         try {
             profilesConfigFile = new ProfilesConfigFile();
         } catch (AmazonClientException ace) {
-            PopulateCredentialsFile(profileName, awsAccessKey, awsSecretKey, awsSessionToken);
+            populateCredentialsFile(profileName, awsAccessKey, awsSecretKey, awsSessionToken);
         }
 
         try {
             if (profilesConfigFile != null && profilesConfigFile.getCredentials(profileName) != null) {
                 //if we end up here, it means we were  able to find a matching profile
-                PopulateCredentialsFile(profileName, awsAccessKey, awsSecretKey, awsSessionToken);
+                populateCredentialsFile(profileName, awsAccessKey, awsSecretKey, awsSessionToken);
             }
         } catch (AmazonClientException ace) {
             //this could happen if the default profile doesn't have a valid AWS Access Key ID
             //in this case, error would be "Unable to load credentials into profile [default]: AWS Access Key ID is not specified."
-            PopulateCredentialsFile(profileName, awsAccessKey, awsSecretKey, awsSessionToken);
+            populateCredentialsFile(profileName, awsAccessKey, awsSecretKey, awsSessionToken);
         } catch (IllegalArgumentException iae) {
             //if we end up here, it means we were not able to find a matching profile so we need to append one
-            PopulateCredentialsFile(profileName, awsAccessKey, awsSecretKey, awsSessionToken);
+            populateCredentialsFile(profileName, awsAccessKey, awsSecretKey, awsSessionToken);
         }
     }
 
-    private static void PopulateCredentialsFile(String profileName, String awsAccessKey, String awsSecretKey,
+    private static void populateCredentialsFile(String profileName, String awsAccessKey, String awsSecretKey,
             String awsSessionToken) throws IOException {
 
         File credentialsFile = new File(System.getProperty("user.home") + "/.aws/credentials");
@@ -850,7 +865,7 @@ public class awscli {
                 SdkProfilesFactory.convert(awsCredentialsProfile));
     }
 
-    private static void UpdateConfigFile(String profileName, String roleToAssume) throws IOException {
+    private static void updateConfigFile(String profileName, String roleToAssume) throws IOException {
 
         File inFile = new File(System.getProperty("user.home") + "/.aws/config");
 
@@ -873,7 +888,7 @@ public class awscli {
 
         // If there is no existing profile, then write configuration for the new profile.
         if (!profileExists) {
-            WriteNewRoleToAssume(pw, profileName, roleToAssume);
+            writeNewRoleToAssume(pw, profileName, roleToAssume);
         }
 
         pw.flush();
@@ -890,7 +905,7 @@ public class awscli {
         }
     }
 
-    public static void WriteNewProfile(PrintWriter pw, String profileNameLine, String awsAccessKey, String awsSecretKey,
+    public static void writeNewProfile(PrintWriter pw, String profileNameLine, String awsAccessKey, String awsSecretKey,
             String awsSessionToken) {
         pw.println(profileNameLine);
         pw.println("aws_access_key_id=" + awsAccessKey);
@@ -902,7 +917,7 @@ public class awscli {
         pw.println("aws_security_token=" + awsSessionToken);
     }
 
-    public static void WriteNewRoleToAssume(PrintWriter pw, String profileName, String roleToAssume) {
+    public static void writeNewRoleToAssume(PrintWriter pw, String profileName, String roleToAssume) {
 
         pw.println("[profile " + profileName + "]");
         if (roleToAssume != null && !roleToAssume.equals(""))
@@ -973,9 +988,9 @@ public class awscli {
 
 
     /*Handles factor selection based on factors found in parameter authResponse, returns the selected factor
- * Precondition: JSINObject authResponse
- * Postcondition: return session token as String sessionToken
- */
+     * Precondition: JSINObject authResponse
+     * Postcondition: return session token as String sessionToken
+     */
     public static JSONObject selectFactor(JSONObject authResponse) throws JSONException {
         JSONArray factors = authResponse.getJSONObject("_embedded").getJSONArray("factors");
 
@@ -1030,7 +1045,6 @@ public class awscli {
 
     private static String questionFactor(JSONObject factor, String stateToken) throws JSONException, ClientProtocolException, IOException {
         String question = factor.getJSONObject("profile").getString("questionText");
-        Scanner scanner = new Scanner(System.in);
         String sessionToken = "";
         String answer = "";
 
@@ -1062,7 +1076,6 @@ public class awscli {
             return verifyAnswer(cli.getOptionValue(SECOND_FACTOR_TOKEN_OPT), factor, stateToken, "sms");
         }
 
-        Scanner scanner = new Scanner(System.in);
         String answer = "";
         String sessionToken = "";
 
@@ -1101,7 +1114,6 @@ public class awscli {
             return verifyAnswer(cli.getOptionValue(SECOND_FACTOR_TOKEN_OPT), factor, stateToken, "token:software:totp");
         }
 
-        Scanner scanner = new Scanner(System.in);
         String sessionToken = "";
         String answer = "";
 
