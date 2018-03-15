@@ -106,7 +106,7 @@ public class AwsCli {
 
     private static final String PROFILE_OPT = "p";
 
-    private static Set<String> SUPPORTED_2FA = new HashSet<String>(Arrays.asList(new String[] { "google" }));
+    private static Set<String> SUPPORTED_2FA = new HashSet<String>(Arrays.asList(new String[]{"google"}));
 
     //User specific variables
     private static String oktaOrg = "";
@@ -154,8 +154,10 @@ public class AwsCli {
         try {
             String strOktaSessionToken = oktaAuthntication();
             if (!strOktaSessionToken.equalsIgnoreCase(""))
-                // Step #2 get SAML assertion from Okta.
+            // Step #2 get SAML assertion from Okta.
+            {
                 resultSAML = awsSamlHandler(strOktaSessionToken);
+            }
         } catch (MalformedURLException e) {
             e.printStackTrace();
         } catch (UnknownHostException e) {
@@ -201,7 +203,7 @@ public class AwsCli {
                 + "the --profile (or -p) command line option followed by the name of the\n"
                 + "desired profile. The profiles in the okta-aws-login config.properties\n"
                 + "file correspond with the profiles in your AWS config file.\n\n";
-        formatter.printHelp(preamble, cliOptions );
+        formatter.printHelp(preamble, cliOptions);
     }
 
     /* Authenticates users credentials via Okta, return Okta session token
@@ -256,7 +258,7 @@ public class AwsCli {
     }
 
     private static String responseBodyToString(CloseableHttpResponse response) throws IOException {
-        try(BufferedReader br = new BufferedReader(new InputStreamReader((response.getEntity().getContent()), UTF_8))) {
+        try (BufferedReader br = new BufferedReader(new InputStreamReader((response.getEntity().getContent()), UTF_8))) {
             return br.readLine();
         }
     }
@@ -265,7 +267,6 @@ public class AwsCli {
     private static CloseableHttpResponse authnticateCredentials(String username, String password) throws JSONException, ClientProtocolException, IOException {
         HttpPost httpost = null;
         CloseableHttpClient httpClient = HttpClients.createDefault();
-
 
         //HTTP Post request to Okta API for session token
         httpost = new HttpPost("https://" + oktaOrg + "/api/v1/authn");
@@ -305,7 +306,7 @@ public class AwsCli {
         f = new File(System.getProperty("user.home") + "/.aws/config");
         //creates credentials file if it doesn't exist yet
         if (!f.exists()) {
-            if(!f.getParentFile().mkdirs()) {
+            if (!f.getParentFile().mkdirs()) {
                 throw new FileNotFoundException("Could not create " + f.getParentFile().getAbsolutePath());
             }
 
@@ -347,7 +348,7 @@ public class AwsCli {
         } else {
             System.out.println("Your config.properties file contains multiple profiles, please select one:");
             for (int i = 0; i < keySetArray.length; i++) {
-                System.out.println(String.format("[%d] %s", i+1, keySetArray[i]));
+                System.out.println(String.format("[%d] %s", i + 1, keySetArray[i]));
             }
             int selection = numSelection(keySetArray.length);
             return keySetArray[selection];
@@ -355,7 +356,7 @@ public class AwsCli {
     }
 
     private static Properties getOktaPropertiesFromLocalConfig() throws FileNotFoundException, IOException {
-        try(InputStreamReader reader = new InputStreamReader(new FileInputStream(new File("config.properties")), US_ASCII)) {
+        try (InputStreamReader reader = new InputStreamReader(new FileInputStream(new File("config.properties")), US_ASCII)) {
             Properties properties = new Properties();
             properties.load(reader);
             return properties;
@@ -489,7 +490,7 @@ public class AwsCli {
         HttpGet httpget = null;
         CloseableHttpResponse responseSAML = null;
 
-        try(CloseableHttpClient httpClient = HttpClients.createDefault()) {
+        try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
             String resultSAML = "";
             String outputSAML = "";
 
@@ -537,7 +538,9 @@ public class AwsCli {
             String cliRole = cli.getOptionValue(ROLE_OPT);
             String[] parts = findMatchingRole(resultSAMLDecoded, cliRole);
             if (null == parts) {
-                System.out.println(String.format("You are not allowed to assume the '%s' role. Either you don't have permission or there is a typographical error in your input.", cliRole));
+                System.out.println(String.format(
+                        "You are not allowed to assume the '%s' role. Either you don't have permission or there is a typographical error in your input.",
+                        cliRole));
                 System.exit(1);
             }
             String principalArn = parts[0];
@@ -574,7 +577,6 @@ public class AwsCli {
         String roleArn = roleArns.get(selection);
         crossAccountRoleName = roleArn.substring(roleArn.indexOf("/") + 1);
         logger.debug("Cross-account role is " + crossAccountRoleName);
-
 
         return awsStsAssumeRoleWithSaml(resultSAML, principalArn, roleArn);
     }
@@ -624,7 +626,8 @@ public class AwsCli {
             logger.debug("GetRoleResult: " + roleresult.toString());
             Role role = roleresult.getRole();
             logger.debug("getRole: " + role.toString());
-            ListAttachedRolePoliciesResult arpr = identityManagementClient.listAttachedRolePolicies(new ListAttachedRolePoliciesRequest().withRoleName(roleName));
+            ListAttachedRolePoliciesResult arpr = identityManagementClient
+                    .listAttachedRolePolicies(new ListAttachedRolePoliciesRequest().withRoleName(roleName));
             logger.debug("ListAttachedRolePoliciesResult: " + arpr.toString());
             ListRolePoliciesResult lrpr = identityManagementClient.listRolePolicies(new ListRolePoliciesRequest().withRoleName(roleName));
             logger.debug("ListRolePoliciesResult: " + lrpr.toString());
@@ -663,7 +666,8 @@ public class AwsCli {
                 logger.debug("GetPolicyResult: " + attachedPolicy.toString());
                 Policy policy = rpr.getPolicy();
 
-                GetPolicyVersionResult pvr = identityManagementClient.getPolicyVersion(new GetPolicyVersionRequest().withPolicyArn(policy.getArn()).withVersionId(policy.getDefaultVersionId()));
+                GetPolicyVersionResult pvr = identityManagementClient
+                        .getPolicyVersion(new GetPolicyVersionRequest().withPolicyArn(policy.getArn()).withVersionId(policy.getDefaultVersionId()));
                 logger.debug("GetPolicyVersionResult: " + pvr.toString());
 
                 String policyDoc = pvr.getPolicyVersion().getDocument();
@@ -757,7 +761,7 @@ public class AwsCli {
     }
 
     /* Prompts the user to select a role in case the role policy contains an array of roles instead of a single role
-    */
+     */
     private static String SelectRole(List<String> lstRoles) {
         String strSelectedRole = null;
 
@@ -786,7 +790,8 @@ public class AwsCli {
     /* Retrieves AWS credentials from AWS's assumedRoleResult and write the to aws credential file
      * Precondition :  AssumeRoleWithSAMLResult assumeResult
      */
-    private static void setAWSCredentials(AssumeRoleWithSAMLResult assumeResult, String credentialsProfileName) throws FileNotFoundException, UnsupportedEncodingException, IOException {
+    private static void setAWSCredentials(AssumeRoleWithSAMLResult assumeResult, String credentialsProfileName)
+            throws FileNotFoundException, UnsupportedEncodingException, IOException {
         BasicSessionCredentials temporaryCredentials =
                 new BasicSessionCredentials(
                         assumeResult.getCredentials().getAccessKeyId(),
@@ -894,8 +899,9 @@ public class AwsCli {
             System.out.println("Could not delete original config file");
         } else {
             // Rename the new file to the filename the original file had.
-            if (!tempFile.renameTo(inFile))
+            if (!tempFile.renameTo(inFile)) {
                 System.out.println("Could not rename file");
+            }
         }
     }
 
@@ -914,8 +920,9 @@ public class AwsCli {
     public static void writeNewRoleToAssume(PrintWriter pw, String profileName, String roleToAssume) {
 
         pw.println("[profile " + profileName + "]");
-        if (roleToAssume != null && !roleToAssume.equals(""))
+        if (roleToAssume != null && !roleToAssume.equals("")) {
             pw.println("role_arn=" + roleToAssume);
+        }
         pw.println("source_profile=" + profileName);
         pw.println("region=us-east-1");
     }
@@ -982,9 +989,9 @@ public class AwsCli {
 
 
     /*Handles factor selection based on factors found in parameter authResponse, returns the selected factor
- * Precondition: JSINObject authResponse
- * Postcondition: return session token as String sessionToken
- */
+     * Precondition: JSINObject authResponse
+     * Postcondition: return session token as String sessionToken
+     */
     public static JSONObject selectFactor(JSONObject authResponse) throws JSONException {
         JSONArray factors = authResponse.getJSONObject("_embedded").getJSONArray("factors");
 
@@ -1199,8 +1206,9 @@ public class AwsCli {
             return null;
         }
 
-        if (jsonObjResponse != null && jsonObjResponse.has("sessionToken"))
+        if (jsonObjResponse != null && jsonObjResponse.has("sessionToken")) {
             sessionToken = jsonObjResponse.getString("sessionToken");
+        }
 
         String pushResult = null;
         if (factorType.equals("push")) {
@@ -1221,7 +1229,6 @@ public class AwsCli {
                     }
                 }
 
-
                 while (pushResult == null || pushResult.equals("WAITING")) {
                     pushResult = null;
                     CloseableHttpResponse responsePush = null;
@@ -1238,7 +1245,7 @@ public class AwsCli {
 
                     responsePush = httpClient.execute(pollReq);
 
-                    try(BufferedReader br = new BufferedReader(new InputStreamReader((responsePush.getEntity().getContent()), UTF_8))) {
+                    try (BufferedReader br = new BufferedReader(new InputStreamReader((responsePush.getEntity().getContent()), UTF_8))) {
 
                         String outputTransaction = br.readLine();
                         JSONObject jsonTransaction = new JSONObject(outputTransaction);
@@ -1266,11 +1273,11 @@ public class AwsCli {
             }
         }
 
-
-        if (sessionToken != null)
+        if (sessionToken != null) {
             return sessionToken;
-        else
+        } else {
             return pushResult;
+        }
     }
 
     /* prints final status message to user */
@@ -1317,5 +1324,4 @@ public class AwsCli {
                 .required(false).build());
         return options;
     }
-
 }

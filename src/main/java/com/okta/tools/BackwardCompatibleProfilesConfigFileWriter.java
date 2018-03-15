@@ -12,6 +12,7 @@
  * express or implied. See the License for the specific language governing
  * permissions and limitations under the License.
  */
+
 package com.okta.tools;
 
 import com.amazonaws.SdkClientException;
@@ -21,7 +22,6 @@ import com.amazonaws.auth.profile.internal.AbstractProfilesConfigFileScanner;
 import com.amazonaws.auth.profile.internal.Profile;
 import com.amazonaws.auth.profile.internal.ProfileKeyConstants;
 import com.amazonaws.util.StringUtils;
-
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 
@@ -43,36 +43,29 @@ import java.util.UUID;
 
 /**
  * @author damiri
- * 
- * This class was copy/pasted, with only the slightest modification to the isSupportedProperty() of the static
- * ProfilesConfigFileWriterHelper class because some older AWS SDK libraries (in particular boto2, used by ansible)
- * look for Amazon's session token under variable named `aws_security_token`, rather than `aws_session_token`.
+ *
+ * This class was copy/pasted, with only the slightest modification to the isSupportedProperty() of the static ProfilesConfigFileWriterHelper class because some
+ * older AWS SDK libraries (in particular boto2, used by ansible) look for Amazon's session token under variable named `aws_security_token`, rather than
+ * `aws_session_token`.
  */
 public class BackwardCompatibleProfilesConfigFileWriter {
 
     private static final Log LOG = LogFactory.getLog(ProfilesConfigFileWriter.class);
 
     /**
-     * Write all the credential profiles to a file. Note that this method will
-     * clobber the existing content in the destination file if it's in the
-     * overwrite mode. Use {@link #modifyOrInsertProfiles(File, Profile...)}
-     * instead, if you want to perform in-place modification on your existing
-     * credentials file.
+     * Write all the credential profiles to a file. Note that this method will clobber the existing content in the destination file if it's in the overwrite
+     * mode. Use {@link #modifyOrInsertProfiles(File, Profile...)} instead, if you want to perform in-place modification on your existing credentials file.
      *
-     * @param destination
-     *            The destination file where the credentials will be written to.
-     * @param overwrite
-     *            If true, this method If false, this method will throw
-     *            exception if the file already exists.
-     * @param profiles
-     *            All the credential profiles to be written.
+     * @param destination The destination file where the credentials will be written to.
+     * @param overwrite If true, this method If false, this method will throw exception if the file already exists.
+     * @param profiles All the credential profiles to be written.
      */
     public static void dumpToFile(File destination, boolean overwrite, Profile... profiles) {
         if (destination.exists() && !overwrite) {
             throw new SdkClientException(
                     "The destination file already exists. " +
-                    "Set overwrite=true if you want to clobber the existing " +
-                    "content and completely re-write the file.");
+                            "Set overwrite=true if you want to clobber the existing " +
+                            "content and completely re-write the file.");
         }
 
         OutputStreamWriter writer;
@@ -93,21 +86,20 @@ public class BackwardCompatibleProfilesConfigFileWriter {
 
             writerHelper.writeWithoutExistingContent();
         } finally {
-            try { writer.close(); } catch (IOException ioe) {}
+            try {
+                writer.close();
+            } catch (IOException ioe) {
+            }
         }
 
     }
 
     /**
-     * Modify or insert new profiles into an existing credentials file by
-     * in-place modification. Only the properties of the affected profiles will
-     * be modified; all the unaffected profiles and comment lines will remain
-     * the same. This method does not support renaming a profile.
+     * Modify or insert new profiles into an existing credentials file by in-place modification. Only the properties of the affected profiles will be modified;
+     * all the unaffected profiles and comment lines will remain the same. This method does not support renaming a profile.
      *
-     * @param destination
-     *            The destination file to modify
-     * @param profiles
-     *            All the credential profiles to be written.
+     * @param destination The destination file to modify
+     * @param profiles All the credential profiles to be written.
      */
     public static void modifyOrInsertProfiles(File destination, Profile... profiles) {
         final Map<String, Profile> modifications = new LinkedHashMap<String, Profile>();
@@ -119,16 +111,12 @@ public class BackwardCompatibleProfilesConfigFileWriter {
     }
 
     /**
-     * Modify one profile in the existing credentials file by in-place
-     * modification. This method will rename the existing profile if the
-     * specified Profile has a different name.
+     * Modify one profile in the existing credentials file by in-place modification. This method will rename the existing profile if the specified Profile has a
+     * different name.
      *
-     * @param destination
-     *            The destination file to modify
-     * @param profileName
-     *            The name of the existing profile to be modified
-     * @param newProfile
-     *            The new Profile object.
+     * @param destination The destination file to modify
+     * @param profileName The name of the existing profile to be modified
+     * @param newProfile The new Profile object.
      */
     public static void modifyOneProfile(File destination, String profileName, Profile newProfile) {
         final Map<String, Profile> modifications = Collections.singletonMap(profileName, newProfile);
@@ -137,13 +125,10 @@ public class BackwardCompatibleProfilesConfigFileWriter {
     }
 
     /**
-     * Remove one or more profiles from the existing credentials file by
-     * in-place modification.
+     * Remove one or more profiles from the existing credentials file by in-place modification.
      *
-     * @param destination
-     *            The destination file to modify
-     * @param profileNames
-     *            The names of all the profiles to be deleted.
+     * @param destination The destination file to modify
+     * @param profileNames The names of all the profiles to be deleted.
      */
     public static void deleteProfiles(File destination, String... profileNames) {
         final Map<String, Profile> modifications = new LinkedHashMap<String, Profile>();
@@ -155,12 +140,9 @@ public class BackwardCompatibleProfilesConfigFileWriter {
     }
 
     /**
-     * A package-private method that supports all kinds of profile modification,
-     * including renaming or deleting one or more profiles.
+     * A package-private method that supports all kinds of profile modification, including renaming or deleting one or more profiles.
      *
-     * @param modifications
-     *            Use null key value to indicate a profile that is to be
-     *            deleted.
+     * @param modifications Use null key value to indicate a profile that is to be deleted.
      */
     static void modifyProfiles(File destination, Map<String, Profile> modifications) {
         final boolean inPlaceModify = destination.exists();
@@ -189,7 +171,7 @@ public class BackwardCompatibleProfilesConfigFileWriter {
                 if (!stashed) {
                     throw new SdkClientException(
                             "Failed to stash the existing credentials file " +
-                            "before applying the changes.");
+                                    "before applying the changes.");
                 }
             }
         }
@@ -209,11 +191,11 @@ public class BackwardCompatibleProfilesConfigFileWriter {
             // Make sure the output is valid and can be loaded by the loader
             new ProfilesConfigFile(destination);
 
-            if ( inPlaceModify && !stashLocation.delete() ) {
+            if (inPlaceModify && !stashLocation.delete()) {
                 if (LOG.isDebugEnabled()) {
                     LOG.debug(String
                             .format("Successfully modified the credentials file. But failed to " +
-                                    "delete the stashed copy of the original file (%s).",
+                                            "delete the stashed copy of the original file (%s).",
                                     stashLocation.getAbsolutePath()));
                 }
             }
@@ -227,7 +209,7 @@ public class BackwardCompatibleProfilesConfigFileWriter {
                     // We don't really care about what destination.delete()
                     // returns, since the file might not have been created when
                     // the error occurred.
-                    if ( !destination.delete() ) {
+                    if (!destination.delete()) {
                         LOG.debug("Unable to remove the credentials file "
                                 + "before restoring the original one.");
                     }
@@ -236,59 +218,63 @@ public class BackwardCompatibleProfilesConfigFileWriter {
                     if (!restored) {
                         throw new SdkClientException(
                                 "Unable to restore the original credentials file. " +
-                                "File content stashed in " + stashLocation.getAbsolutePath());
+                                        "File content stashed in " + stashLocation.getAbsolutePath());
                     }
                 }
             }
 
             throw new SdkClientException(
                     "Unable to modify the credentials file. " +
-                    "(The original file has been restored.)",
+                            "(The original file has been restored.)",
                     e);
 
         } finally {
             try {
-                if (writer != null) writer.close();
-            } catch (IOException e) {}
+                if (writer != null) {
+                    writer.close();
+                }
+            } catch (IOException e) {
+            }
         }
     }
 
     /**
-     * Implementation of AbstractProfilesConfigFileScanner, which reads the
-     * content from an existing credentials file (if any) and then modifies some
-     * of the profile properties in place.
+     * Implementation of AbstractProfilesConfigFileScanner, which reads the content from an existing credentials file (if any) and then modifies some of the
+     * profile properties in place.
      */
     private static class ProfilesConfigFileWriterHelper extends AbstractProfilesConfigFileScanner {
 
-        /** The writer where the modified profiles will be output to */
+        /**
+         * The writer where the modified profiles will be output to
+         */
         private final Writer writer;
 
-        /** Map of all the profiles to be modified, keyed by profile names */
+        /**
+         * Map of all the profiles to be modified, keyed by profile names
+         */
         private final Map<String, Profile> newProfiles = new LinkedHashMap<String, Profile>();
 
-        /** Map of the names of all the profiles to be deleted */
-        private final Set<String> deletedProfiles= new HashSet<String>();
+        /**
+         * Map of the names of all the profiles to be deleted
+         */
+        private final Set<String> deletedProfiles = new HashSet<String>();
 
         private final StringBuilder buffer = new StringBuilder();
         private final Map<String, Set<String>> existingProfileProperties = new HashMap<String, Set<String>>();
 
         /**
-         * Creates ProfilesConfigFileWriterHelper with the specified new
-         * profiles.
+         * Creates ProfilesConfigFileWriterHelper with the specified new profiles.
          *
-         * @param writer
-         *            The writer where the modified content is output to.
-         * @param modifications
-         *            A map of all the new profiles, keyed by the profile name.
-         *            If a profile name is associated with a null value, it's
-         *            profile content will be removed.
+         * @param writer The writer where the modified content is output to.
+         * @param modifications A map of all the new profiles, keyed by the profile name. If a profile name is associated with a null value, it's profile
+         * content will be removed.
          */
-        public ProfilesConfigFileWriterHelper(Writer writer, Map<String, Profile> modifications) {
+        ProfilesConfigFileWriterHelper(Writer writer, Map<String, Profile> modifications) {
             this.writer = writer;
 
             for (Entry<String, Profile> entry : modifications.entrySet()) {
                 String profileName = entry.getKey();
-                Profile profile    = entry.getValue();
+                Profile profile = entry.getValue();
 
                 if (profile == null) {
                     deletedProfiles.add(profileName);
@@ -310,9 +296,7 @@ public class BackwardCompatibleProfilesConfigFileWriter {
         }
 
         /**
-         * Read the existing content of a credentials file, and then make
-         * in-place modification according to the new profiles specified in this
-         * class.
+         * Read the existing content of a credentials file, and then make in-place modification according to the new profiles specified in this class.
          */
         public void writeWithExistingContent(Scanner existingContent) {
             buffer.setLength(0);
@@ -351,13 +335,14 @@ public class BackwardCompatibleProfilesConfigFileWriter {
             // Copy the line after flush the buffer
             flush();
 
-            if (deletedProfiles.contains(profileName))
+            if (deletedProfiles.contains(profileName)) {
                 return;
+            }
 
             // If the profile name is changed
             if (newProfiles.get(profileName) != null) {
                 String newProfileName = newProfiles.get(profileName).getProfileName();
-                if ( !newProfileName.equals(profileName) ) {
+                if (!newProfileName.equals(profileName)) {
                     line = "[" + newProfileName + "]";
                 }
             }
@@ -371,9 +356,9 @@ public class BackwardCompatibleProfilesConfigFileWriter {
             Profile modifiedProfile = newProfiles.get(prevProfileName);
             if (modifiedProfile != null) {
                 for (Entry<String, String> entry : modifiedProfile.getProperties().entrySet()) {
-                    String propertyKey   = entry.getKey();
+                    String propertyKey = entry.getKey();
                     String propertyValue = entry.getValue();
-                    if ( !existingProfileProperties.get(prevProfileName).contains(propertyKey) ) {
+                    if (!existingProfileProperties.get(prevProfileName).contains(propertyKey)) {
                         writeProperty(propertyKey, propertyValue);
                     }
                 }
@@ -393,11 +378,12 @@ public class BackwardCompatibleProfilesConfigFileWriter {
             }
             existingProfileProperties.get(profileName).add(propertyKey);
 
-            if (deletedProfiles.contains(profileName))
+            if (deletedProfiles.contains(profileName)) {
                 return;
+            }
 
             // Keep the unsupported properties
-            if ( !isSupportedProperty ) {
+            if (!isSupportedProperty) {
                 writeLine(line);
                 return;
             }
@@ -424,9 +410,9 @@ public class BackwardCompatibleProfilesConfigFileWriter {
             // Append profiles that don't exist in the original file
             for (Entry<String, Profile> entry : newProfiles.entrySet()) {
                 String profileName = entry.getKey();
-                Profile profile    = entry.getValue();
+                Profile profile = entry.getValue();
 
-                if ( !existingProfileProperties.containsKey(profileName) ) {
+                if (!existingProfileProperties.containsKey(profileName)) {
                     // The profile name is not found in the file
                     // Append the profile properties
                     writeProfile(profile);
@@ -445,20 +431,19 @@ public class BackwardCompatibleProfilesConfigFileWriter {
         }
 
         /**
-         * ProfilesConfigFileWriter still deals with legacy {@link Profile} interface so it can only
-         * modify credential related properties. All other properties should be preserved when
-         * modifying profiles.
+         * ProfilesConfigFileWriter still deals with legacy {@link Profile} interface so it can only modify credential related properties. All other properties
+         * should be preserved when modifying profiles.
          */
         @Override
         protected boolean isSupportedProperty(String propertyName) {
             return ProfileKeyConstants.AWS_ACCESS_KEY_ID.equals(propertyName) ||
-                   ProfileKeyConstants.AWS_SECRET_ACCESS_KEY.equals(propertyName) ||
-                   ProfileKeyConstants.AWS_SESSION_TOKEN.equals(propertyName) ||
-                   "aws_security_token".equals(propertyName) ||
-                   ProfileKeyConstants.EXTERNAL_ID.equals(propertyName) ||
-                   ProfileKeyConstants.ROLE_ARN.equals(propertyName) ||
-                   ProfileKeyConstants.ROLE_SESSION_NAME.equals(propertyName) ||
-                   ProfileKeyConstants.SOURCE_PROFILE.equals(propertyName);
+                    ProfileKeyConstants.AWS_SECRET_ACCESS_KEY.equals(propertyName) ||
+                    ProfileKeyConstants.AWS_SESSION_TOKEN.equals(propertyName) ||
+                    "aws_security_token".equals(propertyName) ||
+                    ProfileKeyConstants.EXTERNAL_ID.equals(propertyName) ||
+                    ProfileKeyConstants.ROLE_ARN.equals(propertyName) ||
+                    ProfileKeyConstants.ROLE_SESSION_NAME.equals(propertyName) ||
+                    ProfileKeyConstants.SOURCE_PROFILE.equals(propertyName);
         }
 
         /* Private interface */
@@ -484,8 +469,7 @@ public class BackwardCompatibleProfilesConfigFileWriter {
         }
 
         /**
-         * This method handles IOException that occurs when calling the append
-         * method on the writer.
+         * This method handles IOException that occurs when calling the append method on the writer.
          */
         private void append(String str) {
             try {
