@@ -164,7 +164,7 @@ public class AwsCli {
             logger.error("\nUnable to establish a connection with AWS. \nPlease verify that your OKTA_AWS_APP_URL parameter is correct and try again");
             System.exit(0);
         } catch (ClientProtocolException e) {
-            logger.error("\nNo Org found, please specify an OKTA_ORG parameter in your config.properties file");
+            logger.error("\nNo Org found, please specify an OKTA_ORG parameter in your okta properties file");
             System.exit(0);
         } catch (IOException e) {
             e.printStackTrace();
@@ -199,9 +199,9 @@ public class AwsCli {
         HelpFormatter formatter = new HelpFormatter();
         String preamble = "\n"
                 + "The okta-aws-login supports multiple AWS accounts through configuration\n"
-                + "profiles in the local config.properties file. To switch profiles use\n"
+                + "profiles in the local okta properties file. To switch profiles use\n"
                 + "the --profile (or -p) command line option followed by the name of the\n"
-                + "desired profile. The profiles in the okta-aws-login config.properties\n"
+                + "desired profile. The profiles in the okta-aws-login properties\n"
                 + "file correspond with the profiles in your AWS config file.\n\n";
         formatter.printHelp(preamble, cliOptions);
     }
@@ -337,30 +337,44 @@ public class AwsCli {
         return profileName;
     }
 
-    static String resolveProfileName() {
-        ProfilesConfigFile awsProfilesConfigFile = new ProfilesConfigFile(new File("config.properties"));
-        Set<String> keySet = awsProfilesConfigFile.getAllBasicProfiles().keySet();
-        String keySetArray[] = keySet.toArray(new String[keySet.size()]);
-        if (1 > keySetArray.length) {
-            throw new IllegalStateException("The Okta configuration file is empty.");
-        } else if (1 == keySetArray.length) {
-            return keySetArray[0];
-        } else {
-            System.out.println("Your config.properties file contains multiple profiles, please select one:");
-            for (int i = 0; i < keySetArray.length; i++) {
-                System.out.println(String.format("[%d] %s", i + 1, keySetArray[i]));
+    // shame ... shame ... shame ...
+    private static final File[] FILES = new File[]{new File("config.properties"), new File(System.getProperty("USER.HOME"), ".okta-config.properties")};
+
+    static String resolveProfileName() throws FileNotFoundException {
+
+        for (File file : FILES) {
+            if (file.exists()) {
+                ProfilesConfigFile awsProfilesConfigFile = new ProfilesConfigFile(file);
+                Set<String> keySet = awsProfilesConfigFile.getAllBasicProfiles().keySet();
+                String keySetArray[] = keySet.toArray(new String[keySet.size()]);
+                if (1 > keySetArray.length) {
+                    throw new IllegalStateException("The Okta configuration file is empty.");
+                } else if (1 == keySetArray.length) {
+                    return keySetArray[0];
+                } else {
+                    System.out.println("Your '" + file.getAbsolutePath() + "' file contains multiple profiles, please select one:");
+                    for (int i = 0; i < keySetArray.length; i++) {
+                        System.out.println(String.format("[%d] %s", i + 1, keySetArray[i]));
+                    }
+                    int selection = numSelection(keySetArray.length);
+                    return keySetArray[selection];
+                }
             }
-            int selection = numSelection(keySetArray.length);
-            return keySetArray[selection];
         }
+        throw new FileNotFoundException("No config file ($HOME/.okta-config.properties and config.properties) found");
     }
 
     private static Properties getOktaPropertiesFromLocalConfig() throws FileNotFoundException, IOException {
-        try (InputStreamReader reader = new InputStreamReader(new FileInputStream(new File("config.properties")), US_ASCII)) {
-            Properties properties = new Properties();
-            properties.load(reader);
-            return properties;
+        for (File file : FILES) {
+            if (file.exists()) {
+                try (InputStreamReader reader = new InputStreamReader(new FileInputStream(file), US_ASCII)) {
+                    Properties properties = new Properties();
+                    properties.load(reader);
+                    return properties;
+                }
+            }
         }
+        throw new FileNotFoundException("No config file ($HOME/.okta-config.properties and config.properties) found");
     }
 
     private static void extractCredentials(String profileName) throws IOException {
@@ -374,14 +388,19 @@ public class AwsCli {
 
     static Properties getOktaPropertiesFromAwsProfile(String profileName) throws FileNotFoundException, IOException {
         ProfilesConfigFile awsProfilesConfigFile;
-        try {
-            awsProfilesConfigFile = new ProfilesConfigFile(new File("config.properties"));
-        } catch (IllegalArgumentException ex) {
-            System.err.println("The Okta configuration file is not in multiple profile format."
-                    + " Will try to load configuration in single profile mode.");
-            return getOktaPropertiesFromLocalConfig();
+        for (File file : FILES) {
+            if (file.exists()) {
+                try {
+                    awsProfilesConfigFile = new ProfilesConfigFile(file);
+                } catch (IllegalArgumentException ex) {
+                    System.err.println("The Okta configuration file '" + file.getAbsolutePath() + "' is not in multiple profile format."
+                            + " Will try to load configuration in single profile mode.");
+                    return getOktaPropertiesFromLocalConfig();
+                }
+                return getProfilePropertiesFromConfigFile(profileName, awsProfilesConfigFile);
+            }
         }
-        return getProfilePropertiesFromConfigFile(profileName, awsProfilesConfigFile);
+        throw new FileNotFoundException("No config file ($HOME/.okta-config.properties and config.properties) found");
     }
 
     private static Properties getProfilePropertiesFromConfigFile(String profileName,
@@ -394,7 +413,7 @@ public class AwsCli {
 
         if (StringUtils.isNullOrEmpty(oktaOrg) || StringUtils.isNullOrEmpty(oktaAwsAppUrl)) {
             System.err.println(String.format("Okta configuration does not exist, or is incomplete, for '%s' profile."
-                    + " Please check your config.properties file for errors. Will try to use default configuration.", profileName));
+                    + " Please check your okta config file for errors. Will try to use default configuration.", profileName));
             System.exit(1);
         }
 
