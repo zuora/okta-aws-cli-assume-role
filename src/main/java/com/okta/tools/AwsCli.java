@@ -12,54 +12,8 @@
 
 package com.okta.tools;
 
-import java.io.BufferedReader;
-import java.io.Console;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.FileReader;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.io.PrintWriter;
-import java.io.UnsupportedEncodingException;
-import java.net.MalformedURLException;
-import java.net.URLDecoder;
-import java.net.UnknownHostException;
-import java.nio.charset.StandardCharsets;
-import java.text.MessageFormat;
-import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Calendar;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.InputMismatchException;
-import java.util.List;
-import java.util.Map;
-import java.util.Properties;
-import java.util.Scanner;
-import java.util.Set;
-
-import org.apache.commons.cli.CommandLine;
-import org.apache.commons.cli.CommandLineParser;
-import org.apache.commons.cli.DefaultParser;
-import org.apache.commons.cli.HelpFormatter;
-import org.apache.commons.cli.Option;
-import org.apache.commons.cli.Options;
-import org.apache.commons.codec.binary.Base64;
-import org.apache.http.client.ClientProtocolException;
-import org.apache.http.client.methods.CloseableHttpResponse;
-import org.apache.http.client.methods.HttpGet;
-import org.apache.http.client.methods.HttpPost;
-import org.apache.http.entity.StringEntity;
-import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClients;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.json.JSONArray;
-import org.json.JSONException;
-import org.json.JSONObject;
+import static java.nio.charset.StandardCharsets.US_ASCII;
+import static java.nio.charset.StandardCharsets.UTF_8;
 
 import com.amazonaws.AmazonClientException;
 import com.amazonaws.auth.BasicAWSCredentials;
@@ -89,8 +43,56 @@ import com.amazonaws.services.securitytoken.model.AssumeRoleWithSAMLResult;
 import com.amazonaws.util.StringUtils;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.CommandLineParser;
+import org.apache.commons.cli.DefaultParser;
+import org.apache.commons.cli.HelpFormatter;
+import org.apache.commons.cli.Option;
+import org.apache.commons.cli.Options;
+import org.apache.commons.codec.binary.Base64;
+import org.apache.http.client.ClientProtocolException;
+import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 
-public class awscli {
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.Console;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
+import java.io.UnsupportedEncodingException;
+import java.net.MalformedURLException;
+import java.net.URLDecoder;
+import java.net.UnknownHostException;
+import java.text.MessageFormat;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Calendar;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.InputMismatchException;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Scanner;
+import java.util.Set;
+
+public class AwsCli {
 
     private static final String SECOND_FACTOR_TOKEN_OPT = "tok";
 
@@ -115,8 +117,8 @@ public class awscli {
     private static String crossAccountRoleName = null;
     private static String roleToAssume; //the ARN of the role the user wants to eventually assume (not the cross-account role, the "real" role in the target account)
     private static int selectedPolicyRank; //the zero-based rank of the policy selected in the selected cross-account role (in case there is more than one policy tied to the current policy)
-    private static final Logger logger = LogManager.getLogger(awscli.class);
- 
+    private static final Logger logger = LogManager.getLogger(AwsCli.class);
+
     private static CommandLine cli;
     private static Options cliOptions;
 
@@ -206,7 +208,7 @@ public class awscli {
      * Postcondition: returns String oktaSessionToken
      * */
     private static String oktaAuthntication() throws ClientProtocolException, JSONException, IOException {
-        Scanner scanner = new Scanner(System.in);
+        Scanner scanner = new Scanner(System.in, "UTF-8");
         CloseableHttpResponse responseAuthenticate = null;
         int requestStatus = 0;
 
@@ -254,8 +256,9 @@ public class awscli {
     }
 
     private static String responseBodyToString(CloseableHttpResponse response) throws IOException {
-        BufferedReader br = new BufferedReader(new InputStreamReader((response.getEntity().getContent())));
-        return br.readLine();
+        try(BufferedReader br = new BufferedReader(new InputStreamReader((response.getEntity().getContent()), UTF_8))) {
+            return br.readLine();
+        }
     }
 
     /*Uses user's credentials to obtain Okta session Token */
@@ -275,7 +278,7 @@ public class awscli {
         jsonObjRequest.put("username", username);
         jsonObjRequest.put("password", password);
 
-        StringEntity entity = new StringEntity(jsonObjRequest.toString(), StandardCharsets.UTF_8);
+        StringEntity entity = new StringEntity(jsonObjRequest.toString(), UTF_8);
         entity.setContentType("application/json");
         httpost.setEntity(entity);
 
@@ -288,7 +291,9 @@ public class awscli {
         File f = new File(System.getProperty("user.home") + "/.aws/credentials");
         //creates credentials file if it doesn't exist yet
         if (!f.exists()) {
-            f.getParentFile().mkdirs();
+            if (!f.getParentFile().mkdirs()) {
+                throw new FileNotFoundException("Could not create " + f.getParentFile().getAbsolutePath());
+            }
 
             PrintWriter writer = new PrintWriter(f, "UTF-8");
             writer.println("[default]");
@@ -300,7 +305,9 @@ public class awscli {
         f = new File(System.getProperty("user.home") + "/.aws/config");
         //creates credentials file if it doesn't exist yet
         if (!f.exists()) {
-            f.getParentFile().mkdirs();
+            if(!f.getParentFile().mkdirs()) {
+                throw new FileNotFoundException("Could not create " + f.getParentFile().getAbsolutePath());
+            }
 
             PrintWriter writer = new PrintWriter(f, "UTF-8");
             writer.println("[profile default]");
@@ -348,7 +355,7 @@ public class awscli {
     }
 
     private static Properties getOktaPropertiesFromLocalConfig() throws FileNotFoundException, IOException {
-        try(FileReader reader = new FileReader(new File("config.properties"))) {
+        try(InputStreamReader reader = new InputStreamReader(new FileInputStream(new File("config.properties")), US_ASCII)) {
             Properties properties = new Properties();
             properties.load(reader);
             return properties;
@@ -400,7 +407,7 @@ public class awscli {
 
     /*Handles possible authentication failures */
     private static void authnFailHandler(int responseStatus, CloseableHttpResponse response) throws IOException {
-        if (200 == responseStatus) {
+        if (responseStatus == 200) {
             return;
         }
 
@@ -415,14 +422,14 @@ public class awscli {
                 logger.error(messageBuffer.toString());
                 return;
             }
-        } else if ((400 <= responseStatus) || (500 > responseStatus)) {
+        } else if ((responseStatus >= 400) && (responseStatus < 500)) {
             messageBuffer.append("This is likely due to a bad request. The response body is:\n");
             messageBuffer.append(responseBody);
             if (null == cli) {
                 logger.error(messageBuffer.toString());
                 return;
             }
-        } else if ((500 <= responseStatus) || (600 > responseStatus)) {
+        } else if (responseStatus < 600) {
             messageBuffer.append("This is likely due to an server error. The response body is:\n");
             messageBuffer.append(responseBody);
             if (null == cli) {
@@ -453,7 +460,7 @@ public class awscli {
     private static int numSelection(int max) {
         int selection = -1;
 
-        Scanner scanner = new Scanner(System.in);
+        Scanner scanner = new Scanner(System.in, "UTF-8");
         while (selection == -1) {
             //prompt user for selection
             System.out.print("Selection: ");
@@ -481,29 +488,30 @@ public class awscli {
     private static String awsSamlHandler(String oktaSessionToken) throws ClientProtocolException, IOException {
         HttpGet httpget = null;
         CloseableHttpResponse responseSAML = null;
-        CloseableHttpClient httpClient = HttpClients.createDefault();
-        String resultSAML = "";
-        String outputSAML = "";
 
-        // Part 2: Get the Identity Provider and Role ARNs.
-        // Request for AWS SAML response containing roles
-        httpget = new HttpGet(oktaAWSAppURL + "?onetimetoken=" + oktaSessionToken);
-        responseSAML = httpClient.execute(httpget);
-        samlFailHandler(responseSAML.getStatusLine().getStatusCode(), responseSAML);
+        try(CloseableHttpClient httpClient = HttpClients.createDefault()) {
+            String resultSAML = "";
+            String outputSAML = "";
 
-        //Parse SAML response
-        BufferedReader brSAML = new BufferedReader(new InputStreamReader(
-                (responseSAML.getEntity().getContent())));
-        //responseSAML.close();
+            // Part 2: Get the Identity Provider and Role ARNs.
+            // Request for AWS SAML response containing roles
+            httpget = new HttpGet(oktaAWSAppURL + "?onetimetoken=" + oktaSessionToken);
+            responseSAML = httpClient.execute(httpget);
+            samlFailHandler(responseSAML.getStatusLine().getStatusCode(), responseSAML);
 
-        while ((outputSAML = brSAML.readLine()) != null) {
-            if (outputSAML.contains("SAMLResponse")) {
-                resultSAML = outputSAML.substring(outputSAML.indexOf("value=") + 7, outputSAML.indexOf("/>") - 1);
-                break;
+            //Parse SAML response
+            try (BufferedReader brSAML = new BufferedReader(new InputStreamReader(
+                    (responseSAML.getEntity().getContent()), UTF_8))) {
+
+                while ((outputSAML = brSAML.readLine()) != null) {
+                    if (outputSAML.contains("SAMLResponse")) {
+                        resultSAML = outputSAML.substring(outputSAML.indexOf("value=") + 7, outputSAML.indexOf("/>") - 1);
+                        break;
+                    }
+                }
             }
+            return resultSAML;
         }
-        httpClient.close();
-        return resultSAML;
     }
 
 
@@ -514,7 +522,7 @@ public class awscli {
     private static AssumeRoleWithSAMLResult assumeAWSRole(String resultSAML) {
         // Decode SAML response
         resultSAML = resultSAML.replace("&#x2b;", "+").replace("&#x3d;", "=");
-        String resultSAMLDecoded = new String(Base64.decodeBase64(resultSAML));
+        String resultSAMLDecoded = new String(Base64.decodeBase64(resultSAML), UTF_8);
 
         ArrayList<String> principalArns = new ArrayList<String>();
         ArrayList<String> roleArns = new ArrayList<String>();
@@ -801,7 +809,7 @@ public class awscli {
             credentialsProfileName = credentialsProfileName.replaceAll(":assumed-role", "");
         }
 
-        Object[] messageArgs = {new String(credentialsProfileName), selectedPolicyRank};
+        Object[] messageArgs = {credentialsProfileName, selectedPolicyRank};
         MessageFormat profileNameFormat = new MessageFormat("{0}/{1}");
         credentialsProfileName = profileNameFormat.format(messageArgs);
 
@@ -855,9 +863,10 @@ public class awscli {
         File inFile = new File(System.getProperty("user.home") + "/.aws/config");
 
         FileInputStream fis = new FileInputStream(inFile);
-        BufferedReader br = new BufferedReader(new InputStreamReader(fis));
+        BufferedReader br = new BufferedReader(new InputStreamReader(fis, US_ASCII));
         File tempFile = new File(inFile.getAbsolutePath() + ".tmp");
-        PrintWriter pw = new PrintWriter(new FileWriter(tempFile));
+
+        PrintWriter pw = new PrintWriter(new BufferedWriter(new OutputStreamWriter(new FileOutputStream(tempFile), US_ASCII)));
 
         String line = null;
         boolean profileExists = false;
@@ -873,7 +882,7 @@ public class awscli {
 
         // If there is no existing profile, then write configuration for the new profile.
         if (!profileExists) {
-            WriteNewRoleToAssume(pw, profileName, roleToAssume);
+            writeNewRoleToAssume(pw, profileName, roleToAssume);
         }
 
         pw.flush();
@@ -890,7 +899,7 @@ public class awscli {
         }
     }
 
-    public static void WriteNewProfile(PrintWriter pw, String profileNameLine, String awsAccessKey, String awsSecretKey,
+    public static void writeNewProfile(PrintWriter pw, String profileNameLine, String awsAccessKey, String awsSecretKey,
             String awsSessionToken) {
         pw.println(profileNameLine);
         pw.println("aws_access_key_id=" + awsAccessKey);
@@ -902,7 +911,7 @@ public class awscli {
         pw.println("aws_security_token=" + awsSessionToken);
     }
 
-    public static void WriteNewRoleToAssume(PrintWriter pw, String profileName, String roleToAssume) {
+    public static void writeNewRoleToAssume(PrintWriter pw, String profileName, String roleToAssume) {
 
         pw.println("[profile " + profileName + "]");
         if (roleToAssume != null && !roleToAssume.equals(""))
@@ -1030,7 +1039,7 @@ public class awscli {
 
     private static String questionFactor(JSONObject factor, String stateToken) throws JSONException, ClientProtocolException, IOException {
         String question = factor.getJSONObject("profile").getString("questionText");
-        Scanner scanner = new Scanner(System.in);
+        Scanner scanner = new Scanner(System.in, "UTF-8");
         String sessionToken = "";
         String answer = "";
 
@@ -1062,7 +1071,7 @@ public class awscli {
             return verifyAnswer(cli.getOptionValue(SECOND_FACTOR_TOKEN_OPT), factor, stateToken, "sms");
         }
 
-        Scanner scanner = new Scanner(System.in);
+        Scanner scanner = new Scanner(System.in, "UTF-8");
         String answer = "";
         String sessionToken = "";
 
@@ -1091,7 +1100,7 @@ public class awscli {
     }
 
 
-    /* 
+    /*
      * Handles token factor authentication, i.e: Google Authenticator or Okta Verify
      *  Precondition: question factor as JSONObject factor, current state token stateToken
      *  Postcondition: return session token as String sessionToken
@@ -1101,7 +1110,7 @@ public class awscli {
             return verifyAnswer(cli.getOptionValue(SECOND_FACTOR_TOKEN_OPT), factor, stateToken, "token:software:totp");
         }
 
-        Scanner scanner = new Scanner(System.in);
+        Scanner scanner = new Scanner(System.in, "UTF-8");
         String sessionToken = "";
         String answer = "";
 
@@ -1173,7 +1182,7 @@ public class awscli {
         httpost.addHeader("Content-Type", "application/json");
         httpost.addHeader("Cache-Control", "no-cache");
 
-        StringEntity entity = new StringEntity(profile.toString(), StandardCharsets.UTF_8);
+        StringEntity entity = new StringEntity(profile.toString(), UTF_8);
         entity.setContentType("application/json");
         httpost.setEntity(entity);
         responseAuthenticate = httpClient.execute(httpost);
@@ -1223,35 +1232,35 @@ public class awscli {
                     pollReq.addHeader("Content-Type", "application/json");
                     pollReq.addHeader("Cache-Control", "no-cache");
 
-                    entity = new StringEntity(profile.toString(), StandardCharsets.UTF_8);
+                    entity = new StringEntity(profile.toString(), UTF_8);
                     entity.setContentType("application/json");
                     pollReq.setEntity(entity);
 
                     responsePush = httpClient.execute(pollReq);
 
-                    BufferedReader br = new BufferedReader(new InputStreamReader((responsePush.getEntity().getContent())));
+                    try(BufferedReader br = new BufferedReader(new InputStreamReader((responsePush.getEntity().getContent()), UTF_8))) {
 
-                    String outputTransaction = br.readLine();
-                    JSONObject jsonTransaction = new JSONObject(outputTransaction);
+                        String outputTransaction = br.readLine();
+                        JSONObject jsonTransaction = new JSONObject(outputTransaction);
 
+                        if (jsonTransaction.has("factorResult")) {
+                            pushResult = jsonTransaction.getString("factorResult");
+                        }
 
-                    if (jsonTransaction.has("factorResult")) {
-                        pushResult = jsonTransaction.getString("factorResult");
-                    }
+                        if (pushResult == null && jsonTransaction.has("status")) {
+                            pushResult = jsonTransaction.getString("status");
+                        }
 
-                    if (pushResult == null && jsonTransaction.has("status")) {
-                        pushResult = jsonTransaction.getString("status");
-                    }
+                        System.out.println("Waiting for you to approve the Okta push notification on your device...");
+                        try {
+                            Thread.sleep(500);
+                        } catch (InterruptedException iex) {
 
-                    System.out.println("Waiting for you to approve the Okta push notification on your device...");
-                    try {
-                        Thread.sleep(500);
-                    } catch (InterruptedException iex) {
+                        }
 
-                    }
-
-                    if (jsonTransaction.has("sessionToken")) {
-                        sessionToken = jsonTransaction.getString("sessionToken");
+                        if (jsonTransaction.has("sessionToken")) {
+                            sessionToken = jsonTransaction.getString("sessionToken");
+                        }
                     }
                 }
             }
