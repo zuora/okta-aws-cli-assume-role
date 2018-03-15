@@ -12,6 +12,11 @@
 
 package com.okta.tools;
 
+import static com.okta.tools.AwsCli.OktaFactor.google;
+import static com.okta.tools.AwsCli.OktaFactor.none;
+import static com.okta.tools.AwsCli.OktaFactor.okta_verify;
+import static com.okta.tools.AwsCli.OktaFactor.question;
+import static com.okta.tools.AwsCli.OktaFactor.sms;
 import static java.nio.charset.StandardCharsets.US_ASCII;
 import static java.nio.charset.StandardCharsets.UTF_8;
 
@@ -94,6 +99,10 @@ import java.util.Set;
 
 public class AwsCli {
 
+    static enum OktaFactor {
+        none, question, sms, google, okta_verify;
+    }
+
     private static final String SECOND_FACTOR_TOKEN_OPT = "tok";
 
     private static final String SECOND_FACTOR_TYPE_OPT = "typ";
@@ -111,6 +120,8 @@ public class AwsCli {
     //User specific variables
     private static String oktaOrg = "";
     private static String oktaAWSAppURL = "";
+    private static String oktaUserName = "";
+    private static OktaFactor oktaAuthMethod = none;
     private static String awsIamKey = null;
     private static String awsIamSecret = null;
 
@@ -220,6 +231,9 @@ public class AwsCli {
             String oktaUsername;
             if ((null != cli) && cli.hasOption(USERNAME_OPT)) {
                 oktaUsername = cli.getOptionValue(USERNAME_OPT);
+            } else if (oktaUserName != null) {
+                oktaUsername = oktaUserName; // clearly quality code
+                System.out.printf("Username is %s (from profile)%n", oktaUsername);
             } else {
                 // Prompt for user credentials
                 System.out.print("Username: ");
@@ -332,6 +346,8 @@ public class AwsCli {
         // Extract oktaOrg and oktaAWSAppURL from Okta settings file.
         oktaOrg = properties.getProperty("OKTA_ORG");
         oktaAWSAppURL = properties.getProperty("OKTA_AWS_APP_URL");
+        oktaUserName = properties.getProperty("OKTA_USERNAME");
+        oktaAuthMethod = OktaFactor.valueOf(properties.getProperty("OKTA_AUTH_METHOD", "none"));
         awsIamKey = properties.getProperty("AWS_IAM_KEY");
         awsIamSecret = properties.getProperty("AWS_IAM_SECRET");
         return profileName;
@@ -382,6 +398,8 @@ public class AwsCli {
 
         oktaOrg = properties.getProperty("OKTA_ORG");
         oktaAWSAppURL = properties.getProperty("OKTA_AWS_APP_URL");
+        oktaUserName = properties.getProperty("OKTA_USERNAME");
+        oktaAuthMethod = OktaFactor.valueOf(properties.getProperty("OKTA_AUTH_METHOD", "none"));
         awsIamKey = properties.getProperty("AWS_IAM_KEY");
         awsIamSecret = properties.getProperty("AWS_IAM_SECRET");
     }
@@ -408,6 +426,14 @@ public class AwsCli {
         BasicProfile profile = awsProfilesConfigFile.getAllBasicProfiles().get(profileName);
         String oktaOrg = profile.getPropertyValue("OKTA_ORG");
         String oktaAwsAppUrl = profile.getPropertyValue("OKTA_AWS_APP_URL");
+        String oktaUserName = profile.getPropertyValue("OKTA_USERNAME");
+
+        String method = profile.getPropertyValue("OKTA_AUTH_METHOD");
+        if (method == null) {
+            method = "none";
+        }
+        OktaFactor oktaAuthMethod = OktaFactor.valueOf(method);
+
         String oktaAwsIamKey = profile.getPropertyValue("AWS_IAM_KEY");
         String oktaAwsIamSecret = profile.getPropertyValue("AWS_IAM_SECRET");
 
@@ -420,6 +446,15 @@ public class AwsCli {
         Properties properties = new Properties();
         properties.put("OKTA_ORG", oktaOrg);
         properties.put("OKTA_AWS_APP_URL", oktaAwsAppUrl);
+
+        if (oktaUserName != null && !oktaUserName.isEmpty()) {
+            properties.put("OKTA_USERNAME", oktaUserName);
+        }
+
+        if (oktaAuthMethod != none) {
+            properties.put("OKTA_AUTH_METHOD", oktaAuthMethod.name());
+        }
+
         properties.put("AWS_IAM_KEY", oktaAwsIamKey);
         properties.put("AWS_IAM_SECRET", oktaAwsIamSecret);
         return properties;
@@ -589,8 +624,13 @@ public class AwsCli {
             i++;
         }
 
-        //Prompt user for role selection
-        int selection = numSelection(roleArns.size());
+        int selection = 0;
+        if (i > 1) {
+            //Prompt user for role selection
+            selection = numSelection(roleArns.size());
+        } else {
+            System.out.println("Selected only role presented.");
+        }
 
         String principalArn = principalArns.get(selection);
         String roleArn = roleArns.get(selection);
@@ -1038,27 +1078,44 @@ public class AwsCli {
 
         System.out.println("\nMulti-Factor authentication is required. Please select a factor to use.");
         //list factor to select from to user
+        int selection = -1;
         System.out.println("Factors:");
         for (int i = 0; i < factors.length(); i++) {
             JSONObject factor = factors.getJSONObject(i);
             String factorType = factor.getString("factorType");
             if (factorType.equals("question")) {
                 factorType = "Security Question";
+                if (oktaAuthMethod == question) {
+                    selection = i;
+                }
             } else if (factorType.equals("sms")) {
                 factorType = "SMS Authentication";
+                if (oktaAuthMethod == sms) {
+                    selection = i;
+                }
             } else if (factorType.equals("token:software:totp")) {
                 String provider = factor.getString("provider");
                 if (provider.equals("GOOGLE")) {
                     factorType = "Google Authenticator";
+                    if (oktaAuthMethod == google) {
+                        selection = i;
+                    }
                 } else {
                     factorType = "Okta Verify";
+                    if (oktaAuthMethod == okta_verify) {
+                        selection = i;
+                    }
                 }
             }
             System.out.println("[ " + (i + 1) + " ] : " + factorType);
         }
 
-        //Handles user factor selection
-        int selection = numSelection(factors.length());
+        if (selection == -1) {
+            //Handles user factor selection
+            selection = numSelection(factors.length());
+        } else {
+            System.out.printf("Selected %d from profile%n", selection + 1);
+        }
         return factors.getJSONObject(selection);
     }
 
