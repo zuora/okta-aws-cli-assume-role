@@ -12,10 +12,8 @@
  * License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.okta.tools;
 
-import java.util.HashMap;
-import java.util.Map;
+package com.okta.tools;
 
 import com.amazonaws.auth.AWSCredentials;
 import com.amazonaws.auth.BasicAWSCredentials;
@@ -24,6 +22,9 @@ import com.amazonaws.auth.profile.internal.BasicProfile;
 import com.amazonaws.auth.profile.internal.Profile;
 import com.amazonaws.auth.profile.internal.ProfileKeyConstants;
 import com.amazonaws.internal.StaticCredentialsProvider;
+
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Profile factory class to dispatch commonly used profiles.
@@ -54,11 +55,13 @@ public class SdkProfilesFactory {
      * Convert a BasicProfile instance to the legacy Profile class.
      */
     public static Profile convert(BasicProfile profile) {
-        if (profile == null) return null;
+        if (profile == null) {
+            return null;
+        }
         AWSCredentials credentials;
         if (profile.getAwsSessionToken() != null) {
             credentials = new BasicSessionCredentials(
-                    profile.getAwsAccessIdKey(), 
+                    profile.getAwsAccessIdKey(),
                     profile.getAwsSecretAccessKey(),
                     profile.getAwsSessionToken());
         } else {
@@ -68,8 +71,7 @@ public class SdkProfilesFactory {
         }
         Profile legacyProfile = new Profile(profile.getProfileName(), profile.getProperties(),
                 new StaticCredentialsProvider(credentials));
-        
+
         return legacyProfile;
     }
-
 }
