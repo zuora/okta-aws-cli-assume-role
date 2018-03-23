@@ -88,18 +88,19 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.InputMismatchException;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Scanner;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 public class AwsCli {
 
-    static enum OktaFactor {
+    enum OktaFactor {
         none, question, sms, google, okta_verify;
     }
 
@@ -115,7 +116,11 @@ public class AwsCli {
 
     private static final String PROFILE_OPT = "p";
 
-    private static Set<String> SUPPORTED_2FA = new HashSet<String>(Arrays.asList(new String[]{"google"}));
+    private static Set<String> SUPPORTED_2FA = Collections.singleton("google");
+
+    private static final File[] CONFIG_FILES = new File[]{new File("config.properties"), new File(System.getProperty("user.home"), ".okta-config.properties")};
+    private static final String CONFIG_FILE_NAMES = Arrays.stream(CONFIG_FILES).map(File::getAbsolutePath).collect(Collectors.joining(", "));
+
 
     //User specific variables
     private static String oktaOrg = "";
@@ -150,11 +155,11 @@ public class AwsCli {
         String profileName = null;
         if (1 == args.length) {
             profileName = args[0];
-        } else if ((null != cli) && cli.hasOption(PROFILE_OPT)) {
+        } else if ((cli != null) && cli.hasOption(PROFILE_OPT)) {
             profileName = cli.getOptionValue(PROFILE_OPT);
         }
 
-        if (null == profileName) {
+        if (profileName == null) {
             profileName = extractCredentials();
         } else {
             extractCredentials(profileName);
@@ -191,7 +196,7 @@ public class AwsCli {
         logger.trace("Role to assume ARN: " + roleToAssume);
 
         // Set profile name to default if it was not specified on the command line.
-        if ((0 == args.length) && (null == profileName)) {
+        if ((0 == args.length) && (profileName == null)) {
             profileName = createDefaultProfileName(arn);
         }
 
@@ -201,7 +206,7 @@ public class AwsCli {
         UpdateConfigFile(profileName, roleToAssume);
 
         // Print Final message
-        if (null == cli) {
+        if (cli == null) {
             resultMessage(profileName);
         }
     }
@@ -213,7 +218,8 @@ public class AwsCli {
                 + "profiles in the local okta properties file. To switch profiles use\n"
                 + "the --profile (or -p) command line option followed by the name of the\n"
                 + "desired profile. The profiles in the okta-aws-login properties\n"
-                + "file correspond with the profiles in your AWS config file.\n\n";
+                + "file correspond with the profiles in your AWS config file.\n\n"
+                + "Supported config files are: " + CONFIG_FILE_NAMES + "\n\n";
         formatter.printHelp(preamble, cliOptions);
     }
 
@@ -228,32 +234,32 @@ public class AwsCli {
         //Redo sequence if response from AWS doesn't return 200 Status
         while (requestStatus != 200) {
 
-            String oktaUsername;
-            if ((null != cli) && cli.hasOption(USERNAME_OPT)) {
-                oktaUsername = cli.getOptionValue(USERNAME_OPT);
+            String username;
+            if ((cli != null) && cli.hasOption(USERNAME_OPT)) {
+                username = cli.getOptionValue(USERNAME_OPT);
             } else if (oktaUserName != null) {
-                oktaUsername = oktaUserName; // clearly quality code
-                System.out.printf("Username is %s (from profile)%n", oktaUsername);
+                username = AwsCli.oktaUserName;
+                System.out.printf("Username is %s (from profile)%n", username);
             } else {
                 // Prompt for user credentials
                 System.out.print("Username: ");
-                oktaUsername = scanner.next();
+                username = scanner.next();
             }
 
-            String oktaPassword;
-            if ((null != cli) && cli.hasOption(PASSWORD_OPT)) {
-                oktaPassword = cli.getOptionValue(PASSWORD_OPT);
+            String password;
+            if ((cli != null) && cli.hasOption(PASSWORD_OPT)) {
+                password = cli.getOptionValue(PASSWORD_OPT);
             } else {
                 Console console = System.console();
                 if (console != null) {
-                    oktaPassword = new String(console.readPassword("Password: "));
+                    password = new String(console.readPassword("Password: "));
                 } else { // hack to be able to debug in an IDE
                     System.out.print("Password: ");
-                    oktaPassword = scanner.next();
+                    password = scanner.next();
                 }
             }
 
-            responseAuthenticate = authnticateCredentials(oktaUsername, oktaPassword);
+            responseAuthenticate = authnticateCredentials(username, password);
             requestStatus = responseAuthenticate.getStatusLine().getStatusCode();
             authnFailHandler(requestStatus, responseAuthenticate);
         }
@@ -265,7 +271,7 @@ public class AwsCli {
         responseAuthenticate.close();
 
         if (jsonObjResponse.getString("status").equals("MFA_REQUIRED")) {
-            return mfa(jsonObjResponse);
+            return mfa(jsonObjResponse, false);
         } else {
             return jsonObjResponse.getString("sessionToken");
         }
@@ -317,7 +323,7 @@ public class AwsCli {
             writer.close();
         }
 
-        f = new File(System.getProperty("user.home") + "/.aws/config");
+        f = new File(System.getProperty("user.home"), ".aws/config");
         //creates credentials file if it doesn't exist yet
         if (!f.exists()) {
             if (!f.getParentFile().mkdirs()) {
@@ -353,36 +359,34 @@ public class AwsCli {
         return profileName;
     }
 
-    // shame ... shame ... shame ...
-    private static final File[] FILES = new File[]{new File("config.properties"), new File(System.getProperty("USER.HOME"), ".okta-config.properties")};
-
     static String resolveProfileName() throws FileNotFoundException {
 
-        for (File file : FILES) {
+        for (File file : CONFIG_FILES) {
             if (file.exists()) {
                 ProfilesConfigFile awsProfilesConfigFile = new ProfilesConfigFile(file);
                 Set<String> keySet = awsProfilesConfigFile.getAllBasicProfiles().keySet();
                 String keySetArray[] = keySet.toArray(new String[keySet.size()]);
-                if (1 > keySetArray.length) {
-                    throw new IllegalStateException("The Okta configuration file is empty.");
-                } else if (1 == keySetArray.length) {
+                if (keySetArray.length < 1) {
+                    throw new IllegalStateException("The Okta configuration file '" + file.getAbsolutePath() + "' is empty.");
+                } else if (keySetArray.length == 1) {
                     return keySetArray[0];
                 } else {
-                    System.out.println("Your '" + file.getAbsolutePath() + "' file contains multiple profiles, please select one:");
+                    System.out.printf("The Okta configuration file '%s' contains multiple profiles, please select one:%n", file.getAbsolutePath());
                     for (int i = 0; i < keySetArray.length; i++) {
-                        System.out.println(String.format("[%d] %s", i + 1, keySetArray[i]));
+                        System.out.printf("[%d] %s%n", i + 1, keySetArray[i]);
                     }
                     int selection = numSelection(keySetArray.length);
                     return keySetArray[selection];
                 }
             }
         }
-        throw new FileNotFoundException("No config file ($HOME/.okta-config.properties and config.properties) found");
+        throw new FileNotFoundException("No config files (" + CONFIG_FILE_NAMES + ") found");
     }
 
     private static Properties getOktaPropertiesFromLocalConfig() throws FileNotFoundException, IOException {
-        for (File file : FILES) {
+        for (File file : CONFIG_FILES) {
             if (file.exists()) {
+                System.out.printf("Using config file'%s'.%n", file.getAbsolutePath());
                 try (InputStreamReader reader = new InputStreamReader(new FileInputStream(file), US_ASCII)) {
                     Properties properties = new Properties();
                     properties.load(reader);
@@ -390,7 +394,7 @@ public class AwsCli {
                 }
             }
         }
-        throw new FileNotFoundException("No config file ($HOME/.okta-config.properties and config.properties) found");
+        throw new FileNotFoundException("No config files (" + CONFIG_FILE_NAMES + ") found");
     }
 
     private static void extractCredentials(String profileName) throws IOException {
@@ -406,7 +410,7 @@ public class AwsCli {
 
     static Properties getOktaPropertiesFromAwsProfile(String profileName) throws FileNotFoundException, IOException {
         ProfilesConfigFile awsProfilesConfigFile;
-        for (File file : FILES) {
+        for (File file : CONFIG_FILES) {
             if (file.exists()) {
                 try {
                     awsProfilesConfigFile = new ProfilesConfigFile(file);
@@ -415,15 +419,22 @@ public class AwsCli {
                             + " Will try to load configuration in single profile mode.");
                     return getOktaPropertiesFromLocalConfig();
                 }
+                System.out.printf("Using config file'%s'.%n", file.getAbsolutePath());
                 return getProfilePropertiesFromConfigFile(profileName, awsProfilesConfigFile);
             }
         }
-        throw new FileNotFoundException("No config file ($HOME/.okta-config.properties and config.properties) found");
+        throw new FileNotFoundException("No config file (" + CONFIG_FILE_NAMES + ") found");
     }
 
     private static Properties getProfilePropertiesFromConfigFile(String profileName,
             ProfilesConfigFile awsProfilesConfigFile) {
         BasicProfile profile = awsProfilesConfigFile.getAllBasicProfiles().get(profileName);
+
+        if (profile == null) {
+            System.err.printf("Profile %s is unknown%n", profileName);
+            System.exit(1);
+        }
+
         String oktaOrg = profile.getPropertyValue("OKTA_ORG");
         String oktaAwsAppUrl = profile.getPropertyValue("OKTA_AWS_APP_URL");
         String oktaUserName = profile.getPropertyValue("OKTA_USERNAME");
@@ -438,8 +449,8 @@ public class AwsCli {
         String oktaAwsIamSecret = profile.getPropertyValue("AWS_IAM_SECRET");
 
         if (StringUtils.isNullOrEmpty(oktaOrg) || StringUtils.isNullOrEmpty(oktaAwsAppUrl)) {
-            System.err.println(String.format("Okta configuration does not exist, or is incomplete, for '%s' profile."
-                    + " Please check your okta config file for errors. Will try to use default configuration.", profileName));
+            System.err.printf("Okta configuration does not exist, or is incomplete, for '%s' profile."
+                    + " Please check your Okta config files (%s) for errors. Using default configuration.%n", profileName, CONFIG_FILE_NAMES);
             System.exit(1);
         }
 
@@ -473,21 +484,21 @@ public class AwsCli {
         if (responseStatus == 401) {
             messageBuffer.append("This is likely an authentication failure due to invalid credentials. The response body is:\n");
             messageBuffer.append(responseBody);
-            if (null == cli) {
+            if (cli == null) {
                 logger.error(messageBuffer.toString());
                 return;
             }
         } else if ((responseStatus >= 400) && (responseStatus < 500)) {
             messageBuffer.append("This is likely due to a bad request. The response body is:\n");
             messageBuffer.append(responseBody);
-            if (null == cli) {
+            if (cli == null) {
                 logger.error(messageBuffer.toString());
                 return;
             }
         } else if (responseStatus < 600) {
             messageBuffer.append("This is likely due to an server error. The response body is:\n");
             messageBuffer.append(responseBody);
-            if (null == cli) {
+            if (cli == null) {
                 logger.error(messageBuffer.toString());
                 System.exit(0);
             }
@@ -588,13 +599,13 @@ public class AwsCli {
             System.exit(0);
         }
 
-        if ((null != cli) && cli.hasOption(ROLE_OPT)) {
+        if ((cli != null) && cli.hasOption(ROLE_OPT)) {
             String cliRole = cli.getOptionValue(ROLE_OPT);
             String[] parts = findMatchingRole(resultSAMLDecoded, cliRole);
-            if (null == parts) {
-                System.out.println(String.format(
-                        "You are not allowed to assume the '%s' role. Either you don't have permission or there is a typographical error in your input.",
-                        cliRole));
+            if (parts == null) {
+                System.out.printf(
+                        "You are not allowed to assume the '%s' role. Either you don't have permission or there is a typographical error in your input.%n",
+                        cliRole);
                 System.exit(1);
             }
             String principalArn = parts[0];
@@ -986,11 +997,11 @@ public class AwsCli {
         pw.println("region=us-east-1");
     }
 
-    private static String mfa(JSONObject authResponse) {
+    private static String mfa(JSONObject authResponse, boolean changeFactor) {
 
         try {
             //User selects which factor to use
-            JSONObject factor = selectFactor(authResponse);
+            JSONObject factor = selectFactor(authResponse, changeFactor);
             String factorType = factor.getString("factorType");
             String stateToken = authResponse.getString("stateToken");
 
@@ -1001,7 +1012,7 @@ public class AwsCli {
                     String sessionToken = questionFactor(factor, stateToken);
                     if (sessionToken.equals("change factor")) {
                         System.out.println("Factor Change Initiated");
-                        return mfa(authResponse);
+                        return mfa(authResponse, true);
                     }
                     return sessionToken;
                 }
@@ -1010,7 +1021,7 @@ public class AwsCli {
                     String sessionToken = smsFactor(factor, stateToken);
                     if (sessionToken.equals("change factor")) {
                         System.out.println("Factor Change Initiated");
-                        return mfa(authResponse);
+                        return mfa(authResponse, true);
                     }
                     return sessionToken;
 
@@ -1020,7 +1031,7 @@ public class AwsCli {
                     String sessionToken = totpFactor(factor, stateToken);
                     if (sessionToken.equals("change factor")) {
                         System.out.println("Factor Change Initiated");
-                        return mfa(authResponse);
+                        return mfa(authResponse, true);
                     }
                     return sessionToken;
                 }
@@ -1028,7 +1039,7 @@ public class AwsCli {
                     //push factor handles
                     String result = pushFactor(factor, stateToken);
                     if (result.equals("timeout") || result.equals("change factor")) {
-                        return mfa(authResponse);
+                        return mfa(authResponse, true );
                     }
                     return result;
                 }
@@ -1051,7 +1062,7 @@ public class AwsCli {
      * Precondition: JSINObject authResponse
      * Postcondition: return session token as String sessionToken
      */
-    public static JSONObject selectFactor(JSONObject authResponse) throws JSONException {
+    public static JSONObject selectFactor(JSONObject authResponse, boolean changeFactor) throws JSONException {
         JSONArray factors = authResponse.getJSONObject("_embedded").getJSONArray("factors");
 
         if ((cli != null) && cli.hasOption(SECOND_FACTOR_TYPE_OPT)) {
@@ -1072,7 +1083,7 @@ public class AwsCli {
                 }
             }
 
-            System.out.println(String.format("The configured identity provider does not support '%s' as a second factor of authentication.", cliFactorType));
+            System.out.printf("The configured identity provider does not support '%s' as a second factor of authentication.%n", cliFactorType);
             System.exit(1);
         }
 
@@ -1110,7 +1121,7 @@ public class AwsCli {
             System.out.println("[ " + (i + 1) + " ] : " + factorType);
         }
 
-        if (selection == -1) {
+        if (changeFactor || selection == -1) {
             //Handles user factor selection
             selection = numSelection(factors.length());
         } else {
@@ -1128,7 +1139,7 @@ public class AwsCli {
 
         //prompt user for answer
         System.out.println("\nSecurity Question Factor Authentication\nEnter 'change factor' to use a different factor\n");
-        while ((null == sessionToken) || "".equals(sessionToken)) {
+        while ((sessionToken == null) || "".equals(sessionToken)) {
             if (answer != "") {
                 System.out.println("Please try again");
             }
@@ -1150,7 +1161,7 @@ public class AwsCli {
      * Postcondition: return session token as String sessionToken
      */
     private static String smsFactor(JSONObject factor, String stateToken) throws ClientProtocolException, JSONException, IOException {
-        if ((null != cli) && cli.hasOption(SECOND_FACTOR_TOKEN_OPT)) {
+        if ((cli != null) && cli.hasOption(SECOND_FACTOR_TOKEN_OPT)) {
             return verifyAnswer(cli.getOptionValue(SECOND_FACTOR_TOKEN_OPT), factor, stateToken, "sms");
         }
 
@@ -1160,7 +1171,7 @@ public class AwsCli {
 
         //prompt for sms verification
         System.out.println("\nSMS Factor Authentication \nEnter 'change factor' to use a different factor");
-        while ((null == sessionToken) || "".equals(sessionToken)) {
+        while ((sessionToken == null) || "".equals(sessionToken)) {
             if (answer != "") {
                 System.out.println("Please try again or type 'new code' to be sent a new sms token");
             } else {
@@ -1189,7 +1200,7 @@ public class AwsCli {
      *  Postcondition: return session token as String sessionToken
      */
     private static String totpFactor(JSONObject factor, String stateToken) throws ClientProtocolException, JSONException, IOException {
-        if ((null != cli) && cli.hasOption(SECOND_FACTOR_TOKEN_OPT)) {
+        if ((cli != null) && cli.hasOption(SECOND_FACTOR_TOKEN_OPT)) {
             return verifyAnswer(cli.getOptionValue(SECOND_FACTOR_TOKEN_OPT), factor, stateToken, "token:software:totp");
         }
 
@@ -1199,7 +1210,7 @@ public class AwsCli {
 
         //prompt for token
         System.out.println("\n" + factor.getString("provider") + " Token Factor Authentication\nEnter 'change factor' to use a different factor");
-        while ((null == sessionToken) || "".equals(sessionToken)) {
+        while ((sessionToken == null) || "".equals(sessionToken)) {
             if (answer != "") {
                 System.out.println("Please try again");
             }
@@ -1223,7 +1234,7 @@ public class AwsCli {
         String sessionToken = "";
 
         System.out.println("\nPush Factor Authentication");
-        while ((null == sessionToken) || "".equals(sessionToken)) {
+        while ((sessionToken == null) || "".equals(sessionToken)) {
             //Verify if Okta Push has been pushed
             sessionToken = verifyAnswer(null, factor, stateToken, "push");
             System.out.println(sessionToken);
@@ -1275,7 +1286,7 @@ public class AwsCli {
 
         if (jsonObjResponse.has("errorCode")) {
             String message = "MFA authentication failed with: " + jsonObjResponse.getString("errorSummary");
-            if (null != cli) {
+            if (cli != null) {
                 throw new RuntimeException(message);
             }
             System.out.println(message);
