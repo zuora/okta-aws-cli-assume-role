@@ -129,6 +129,7 @@ public class AwsCli {
     private static OktaFactor oktaAuthMethod = none;
     private static String awsIamKey = null;
     private static String awsIamSecret = null;
+    private static int awsSessionDurationSeconds = 3600;
 
     private static String crossAccountRoleName = null;
     private static String roleToAssume; //the ARN of the role the user wants to eventually assume (not the cross-account role, the "real" role in the target account)
@@ -356,6 +357,7 @@ public class AwsCli {
         oktaAuthMethod = OktaFactor.valueOf(properties.getProperty("OKTA_AUTH_METHOD", "none"));
         awsIamKey = properties.getProperty("AWS_IAM_KEY");
         awsIamSecret = properties.getProperty("AWS_IAM_SECRET");
+        awsSessionDurationSeconds = Integer.parseInt(properties.getProperty("AWS_SESSION_DURATION_SECONDS", "3600"));
         return profileName;
     }
 
@@ -406,6 +408,7 @@ public class AwsCli {
         oktaAuthMethod = OktaFactor.valueOf(properties.getProperty("OKTA_AUTH_METHOD", "none"));
         awsIamKey = properties.getProperty("AWS_IAM_KEY");
         awsIamSecret = properties.getProperty("AWS_IAM_SECRET");
+        awsSessionDurationSeconds = Integer.parseInt(properties.getProperty("AWS_SESSION_DURATION_SECONDS", "3600"));
     }
 
     static Properties getOktaPropertiesFromAwsProfile(String profileName) throws FileNotFoundException, IOException {
@@ -468,6 +471,12 @@ public class AwsCli {
 
         properties.put("AWS_IAM_KEY", oktaAwsIamKey);
         properties.put("AWS_IAM_SECRET", oktaAwsIamSecret);
+
+        String awsDurationSeconds = profile.getPropertyValue("AWS_SESSION_DURATION_SECONDS");
+        if (awsDurationSeconds == null) {
+            awsDurationSeconds = "3600";
+        }
+        properties.put("AWS_SESSION_DURATION_SECONDS", awsDurationSeconds);
         return properties;
     }
 
@@ -663,7 +672,7 @@ public class AwsCli {
                 .withPrincipalArn(principalArn)
                 .withRoleArn(roleArn)
                 .withSAMLAssertion(resultSAML)
-                .withDurationSeconds(3600); //default token duration to 12 hours
+                .withDurationSeconds(awsSessionDurationSeconds);
 
         return stsClient.assumeRoleWithSAML(assumeRequest);
     }
