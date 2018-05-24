@@ -327,7 +327,7 @@ public class AwsCli {
         f = new File(System.getProperty("user.home"), ".aws/config");
         //creates credentials file if it doesn't exist yet
         if (!f.exists()) {
-            if (!f.getParentFile().mkdirs()) {
+            if (!f.getParentFile().exists() && !f.getParentFile().mkdirs()) {
                 throw new FileNotFoundException("Could not create " + f.getParentFile().getAbsolutePath());
             }
 
