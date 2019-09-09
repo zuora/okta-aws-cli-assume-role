@@ -15,6 +15,7 @@ package com.okta.tools;
 import static com.okta.tools.AwsCli.OktaFactor.google;
 import static com.okta.tools.AwsCli.OktaFactor.none;
 import static com.okta.tools.AwsCli.OktaFactor.okta_verify;
+import static com.okta.tools.AwsCli.OktaFactor.push;
 import static com.okta.tools.AwsCli.OktaFactor.question;
 import static com.okta.tools.AwsCli.OktaFactor.sms;
 import static java.nio.charset.StandardCharsets.US_ASCII;
@@ -56,6 +57,8 @@ import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.http.client.ClientProtocolException;
+import org.apache.http.client.config.CookieSpecs;
+import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
@@ -101,7 +104,7 @@ import java.util.stream.Collectors;
 public class AwsCli {
 
     enum OktaFactor {
-        none, question, sms, google, okta_verify;
+        none, question, sms, google, okta_verify, push
     }
 
     private static final String SECOND_FACTOR_TOKEN_OPT = "tok";
@@ -287,7 +290,7 @@ public class AwsCli {
     /*Uses user's credentials to obtain Okta session Token */
     private static CloseableHttpResponse authnticateCredentials(String username, String password) throws JSONException, ClientProtocolException, IOException {
         HttpPost httpost = null;
-        CloseableHttpClient httpClient = HttpClients.createDefault();
+        CloseableHttpClient httpClient = getHttpClient();
 
         //HTTP Post request to Okta API for session token
         httpost = new HttpPost("https://" + oktaOrg + "/api/v1/authn");
@@ -564,7 +567,7 @@ public class AwsCli {
         HttpGet httpget = null;
         CloseableHttpResponse responseSAML = null;
 
-        try (CloseableHttpClient httpClient = HttpClients.createDefault()) {
+        try (CloseableHttpClient httpClient = getHttpClient()) {
             String resultSAML = "";
             String outputSAML = "";
 
@@ -1019,7 +1022,7 @@ public class AwsCli {
                 case ("question"): {
                     //question factor handler
                     String sessionToken = questionFactor(factor, stateToken);
-                    if (sessionToken.equals("change factor")) {
+                    if (sessionToken.equals("change factor") || sessionToken.equals("cf")) {
                         System.out.println("Factor Change Initiated");
                         return mfa(authResponse, true);
                     }
@@ -1028,7 +1031,7 @@ public class AwsCli {
                 case ("sms"): {
                     //sms factor handler
                     String sessionToken = smsFactor(factor, stateToken);
-                    if (sessionToken.equals("change factor")) {
+                    if (sessionToken.equals("change factor") || sessionToken.equals("cf")) {
                         System.out.println("Factor Change Initiated");
                         return mfa(authResponse, true);
                     }
@@ -1038,7 +1041,7 @@ public class AwsCli {
                 case ("token:software:totp"): {
                     //token factor handler
                     String sessionToken = totpFactor(factor, stateToken);
-                    if (sessionToken.equals("change factor")) {
+                    if (sessionToken.equals("change factor") || sessionToken.equals("cf")) {
                         System.out.println("Factor Change Initiated");
                         return mfa(authResponse, true);
                     }
@@ -1047,8 +1050,8 @@ public class AwsCli {
                 case ("push"): {
                     //push factor handles
                     String result = pushFactor(factor, stateToken);
-                    if (result.equals("timeout") || result.equals("change factor")) {
-                        return mfa(authResponse, true );
+                    if (result.equals("timeout") || result.equals("change factor") || result.equals("cf")) {
+                        return mfa(authResponse, true);
                     }
                     return result;
                 }
@@ -1113,6 +1116,11 @@ public class AwsCli {
                 if (oktaAuthMethod == sms) {
                     selection = i;
                 }
+            } else if (factorType.equals("push")) {
+                factorType = "Okta Push Authentication";
+                if (oktaAuthMethod == push) {
+                    selection = i;
+                }
             } else if (factorType.equals("token:software:totp")) {
                 String provider = factor.getString("provider");
                 if (provider.equals("GOOGLE")) {
@@ -1147,7 +1155,7 @@ public class AwsCli {
         String answer = "";
 
         //prompt user for answer
-        System.out.println("\nSecurity Question Factor Authentication\nEnter 'change factor' to use a different factor\n");
+        System.out.println("\nSecurity Question Factor Authentication\nEnter 'cf' or 'change factor' to use a different factor\n");
         while ((sessionToken == null) || "".equals(sessionToken)) {
             if (answer != "") {
                 System.out.println("Please try again");
@@ -1156,7 +1164,7 @@ public class AwsCli {
             System.out.print("Answer: ");
             answer = scanner.nextLine();
             //verify answer is correct
-            if (answer.toLowerCase().equals("change factor")) {
+            if (answer.equals("change factor") || answer.equals("cf")) {
                 return answer;
             }
             sessionToken = verifyAnswer(answer, factor, stateToken, "question");
@@ -1179,10 +1187,10 @@ public class AwsCli {
         String sessionToken = "";
 
         //prompt for sms verification
-        System.out.println("\nSMS Factor Authentication \nEnter 'change factor' to use a different factor");
+        System.out.println("\nSMS Factor Authentication \nEnter 'change factor' or 'cf' to use a different factor");
         while ((sessionToken == null) || "".equals(sessionToken)) {
             if (answer != "") {
-                System.out.println("Please try again or type 'new code' to be sent a new sms token");
+                System.out.println("Please try again or type 'nc' or 'new code' to be sent a new sms token");
             } else {
                 //send initial code to user
                 sessionToken = verifyAnswer("", factor, stateToken, "sms");
@@ -1190,10 +1198,10 @@ public class AwsCli {
             System.out.print("SMS Code: ");
             answer = scanner.nextLine();
             //resends code
-            if (answer.equals("new code")) {
+            if (answer.equals("new code") || answer.equals("nc")) {
                 answer = "";
                 System.out.println("New code sent! \n");
-            } else if (answer.toLowerCase().equals("change factor")) {
+            } else if (answer.equals("change factor") || answer.equals("cf")) {
                 return answer;
             }
             //verifies code
@@ -1218,7 +1226,7 @@ public class AwsCli {
         String answer = "";
 
         //prompt for token
-        System.out.println("\n" + factor.getString("provider") + " Token Factor Authentication\nEnter 'change factor' to use a different factor");
+        System.out.println("\n" + factor.getString("provider") + " Token Factor Authentication\nEnter 'cf' or 'change factor' to use a different factor");
         while ((sessionToken == null) || "".equals(sessionToken)) {
             if (answer != "") {
                 System.out.println("Please try again");
@@ -1227,7 +1235,7 @@ public class AwsCli {
             System.out.print("Token: ");
             answer = scanner.nextLine();
             //verify auth Token
-            if (answer.toLowerCase().equals("change factor")) {
+            if (answer.equals("change factor") || answer.equals("cf")) {
                 return answer;
             }
             sessionToken = verifyAnswer(answer, factor, stateToken, "token:software:totp");
@@ -1246,7 +1254,7 @@ public class AwsCli {
         while ((sessionToken == null) || "".equals(sessionToken)) {
             //Verify if Okta Push has been pushed
             sessionToken = verifyAnswer(null, factor, stateToken, "push");
-            System.out.println(sessionToken);
+
             if (sessionToken.equals("Timeout")) {
                 System.out.println("Session has timed out");
                 return "timeout";
@@ -1276,93 +1284,96 @@ public class AwsCli {
             profile.put("answer", answer);
         }
 
+        String pushResult = null;
+
         //create post request
         CloseableHttpResponse responseAuthenticate = null;
-        CloseableHttpClient httpClient = HttpClients.createDefault();
+        try (CloseableHttpClient httpClient = getHttpClient()) {
 
-        HttpPost httpost = new HttpPost(verifyPoint);
-        httpost.addHeader("Accept", "application/json");
-        httpost.addHeader("Content-Type", "application/json");
-        httpost.addHeader("Cache-Control", "no-cache");
+            HttpPost httpost = new HttpPost(verifyPoint);
+            httpost.addHeader("Accept", "application/json");
+            httpost.addHeader("Content-Type", "application/json");
+            httpost.addHeader("Cache-Control", "no-cache");
 
-        StringEntity entity = new StringEntity(profile.toString(), UTF_8);
-        entity.setContentType("application/json");
-        httpost.setEntity(entity);
-        responseAuthenticate = httpClient.execute(httpost);
+            StringEntity entity = new StringEntity(profile.toString(), UTF_8);
+            entity.setContentType("application/json");
+            httpost.setEntity(entity);
+            responseAuthenticate = httpClient.execute(httpost);
 
-        String outputAuthenticate = responseBodyToString(responseAuthenticate);
-        jsonObjResponse = new JSONObject(outputAuthenticate);
+            String outputAuthenticate = responseBodyToString(responseAuthenticate);
+            jsonObjResponse = new JSONObject(outputAuthenticate);
 
-        if (jsonObjResponse.has("errorCode")) {
-            String message = "MFA authentication failed with: " + jsonObjResponse.getString("errorSummary");
-            if (cli != null) {
-                throw new RuntimeException(message);
-            }
-            System.out.println(message);
-            return null;
-        }
-
-        if (jsonObjResponse != null && jsonObjResponse.has("sessionToken")) {
-            sessionToken = jsonObjResponse.getString("sessionToken");
-        }
-
-        String pushResult = null;
-        if (factorType.equals("push")) {
-            if (jsonObjResponse.has("_links")) {
-                JSONObject linksObj = jsonObjResponse.getJSONObject("_links");
-
-                //JSONObject pollLink = links.getJSONObject("poll");
-                JSONArray names = linksObj.names();
-                JSONArray links = linksObj.toJSONArray(names);
-                String pollUrl = "";
-                for (int i = 0; i < links.length(); i++) {
-                    JSONObject link = links.getJSONObject(i);
-                    String linkName = link.getString("name");
-                    if (linkName.equals("poll")) {
-                        pollUrl = link.getString("href");
-                        break;
-                        //System.out.println("[ " + (i+1) + " ] :" + factorType );
-                    }
+            if (jsonObjResponse.has("errorCode")) {
+                String message = "MFA authentication failed with: " + jsonObjResponse.getString("errorSummary");
+                if (cli != null) {
+                    throw new RuntimeException(message);
                 }
+                System.out.println(message);
+                return null;
+            }
 
-                while (pushResult == null || pushResult.equals("WAITING")) {
-                    pushResult = null;
-                    CloseableHttpResponse responsePush = null;
-                    httpClient = HttpClients.createDefault();
+            if (jsonObjResponse != null && jsonObjResponse.has("sessionToken")) {
+                sessionToken = jsonObjResponse.getString("sessionToken");
+            }
 
-                    HttpPost pollReq = new HttpPost(pollUrl);
-                    pollReq.addHeader("Accept", "application/json");
-                    pollReq.addHeader("Content-Type", "application/json");
-                    pollReq.addHeader("Cache-Control", "no-cache");
+            if (factorType.equals("push")) {
+                if (jsonObjResponse.has("_links")) {
+                    JSONObject linksObj = jsonObjResponse.getJSONObject("_links");
 
-                    entity = new StringEntity(profile.toString(), UTF_8);
-                    entity.setContentType("application/json");
-                    pollReq.setEntity(entity);
-
-                    responsePush = httpClient.execute(pollReq);
-
-                    try (BufferedReader br = new BufferedReader(new InputStreamReader((responsePush.getEntity().getContent()), UTF_8))) {
-
-                        String outputTransaction = br.readLine();
-                        JSONObject jsonTransaction = new JSONObject(outputTransaction);
-
-                        if (jsonTransaction.has("factorResult")) {
-                            pushResult = jsonTransaction.getString("factorResult");
+                    //JSONObject pollLink = links.getJSONObject("poll");
+                    JSONArray names = linksObj.names();
+                    JSONArray links = linksObj.toJSONArray(names);
+                    String pollUrl = "";
+                    for (int i = 0; i < links.length(); i++) {
+                        JSONObject link = links.getJSONObject(i);
+                        String linkName = link.getString("name");
+                        if (linkName.equals("poll")) {
+                            pollUrl = link.getString("href");
+                            break;
+                            //System.out.println("[ " + (i+1) + " ] :" + factorType );
                         }
+                    }
 
-                        if (pushResult == null && jsonTransaction.has("status")) {
-                            pushResult = jsonTransaction.getString("status");
-                        }
+                    System.out.println("Waiting for you to approve the Okta push notification on your device...");
 
-                        System.out.println("Waiting for you to approve the Okta push notification on your device...");
-                        try {
-                            Thread.sleep(500);
-                        } catch (InterruptedException iex) {
+                    while (pushResult == null || pushResult.equals("WAITING")) {
+                        pushResult = null;
+                        CloseableHttpResponse responsePush = null;
 
-                        }
+                        HttpPost pollReq = new HttpPost(pollUrl);
+                        pollReq.addHeader("Accept", "application/json");
+                        pollReq.addHeader("Content-Type", "application/json");
+                        pollReq.addHeader("Cache-Control", "no-cache");
 
-                        if (jsonTransaction.has("sessionToken")) {
-                            sessionToken = jsonTransaction.getString("sessionToken");
+                        entity = new StringEntity(profile.toString(), UTF_8);
+                        entity.setContentType("application/json");
+                        pollReq.setEntity(entity);
+
+                        responsePush = httpClient.execute(pollReq);
+
+                        try (BufferedReader br = new BufferedReader(new InputStreamReader((responsePush.getEntity().getContent()), UTF_8))) {
+
+                            String outputTransaction = br.readLine();
+                            JSONObject jsonTransaction = new JSONObject(outputTransaction);
+
+                            if (jsonTransaction.has("factorResult")) {
+                                pushResult = jsonTransaction.getString("factorResult");
+                            }
+
+                            if (pushResult == null && jsonTransaction.has("status")) {
+                                pushResult = jsonTransaction.getString("status");
+                            }
+
+                            try {
+                                Thread.sleep(500);
+                            } catch (InterruptedException iex) {
+                                Thread.currentThread().interrupt();
+                                System.exit(0);
+                            }
+
+                            if (jsonTransaction.has("sessionToken")) {
+                                sessionToken = jsonTransaction.getString("sessionToken");
+                            }
                         }
                     }
                 }
@@ -1419,5 +1430,11 @@ public class AwsCli {
                 .desc("The token for the second factor of authentication.")
                 .required(false).build());
         return options;
+    }
+
+    private static CloseableHttpClient getHttpClient() {
+        return HttpClients.custom()
+                .setDefaultRequestConfig(RequestConfig.custom().setCookieSpec(CookieSpecs.STANDARD).build())
+                .build();
     }
 }
